@@ -1,5 +1,9 @@
 # Kura
 
+## Status
+Kura is a work in progress. The main flows are implemented (auth + core list/pantry features), and I’m currently improving reliability, polish, and expanding features.
+
+
 Kura is a personal food and household management app built with Expo (React Native).
 It focuses on three core areas:
 - Pantry tracking
