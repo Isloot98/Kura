@@ -1,0 +1,47 @@
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+.expo-shared/
+dist/
+web-build/
+
+# Metro
+.metro-health-check*
+
+# Native build outputs / secrets
+android/.gradle/
+android/app/build/
+ios/Pods/
+ios/build/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+
+# env
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# typescript
+*.tsbuildinfo
+
+
+*.backup
+db_cluster-*.backup

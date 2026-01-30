@@ -1,0 +1,57 @@
+{
+  "name": "kura-app",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@expo-google-fonts/hachi-maru-pop": "^0.4.0",
+    "@expo-google-fonts/shizuru": "^0.4.0",
+    "@expo-google-fonts/zen-tokyo-zoo": "^0.4.0",
+    "@expo/vector-icons": "^14.1.0",
+    "@react-native-async-storage/async-storage": "2.1.2",
+    "@react-native-community/datetimepicker": "8.3.0",
+    "@react-native-ml-kit/barcode-scanning": "^1.4.1",
+    "@react-native-picker/picker": "2.11.0",
+    "@react-navigation/bottom-tabs": "^7.3.12",
+    "@react-navigation/elements": "^2.4.1",
+    "@react-navigation/native": "^7.1.8",
+    "@react-navigation/native-stack": "^7.3.12",
+    "@supabase/supabase-js": "^2.49.4",
+    "expo": "~53.0.9",
+    "expo-camera": "~16.1.6",
+    "expo-dev-client": "~5.1.8",
+    "expo-font": "~13.3.1",
+    "expo-status-bar": "~2.2.3",
+    "kura-app": "file:",
+    "lodash.debounce": "^4.0.8",
+    "react": "19.0.0",
+    "react-native": "0.79.2",
+    "react-native-reanimated": "^3.18.0",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.11.1",
+    "react-native-url-polyfill": "^2.0.0",
+    "react-native-vision-camera": "^4.6.4"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@types/react": "~19.0.10",
+    "@types/react-native": "^0.73.0",
+    "typescript": "~5.8.3"
+  },
+  "private": true,
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "kura-app",
+          "lodash.debounce"
+        ]
+      }
+    }
+  }
+}
