@@ -45,3 +45,6 @@ yarn-error.*
 
 *.backup
 db_cluster-*.backup
+
+
+android/app/debug.keystore

@@ -14,7 +14,9 @@ import { supabase } from "../lib/supabase";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import debounce from "lodash.debounce";
 import { FlatList, ActivityIndicator } from "react-native";
-import { searchProducts } from "../lib/openFoodFacts.js"; // assuming it's there
+import { searchProducts } from "../lib/openFoodFacts.js"; 
+import { useRoute } from "@react-navigation/native";
+
 
 const AddItem = () => {
   const navigation = useNavigation();
@@ -28,12 +30,14 @@ const AddItem = () => {
   const [searchResults, setSearchResults] = useState([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [suppressSearch, setSuppressSearch] = useState(false);
+  const route = useRoute();
+
 
   const onChange = (event, selectedDate) => {
     if (event.type === "set" && selectedDate) {
       setExpiryDate(selectedDate);
     }
-    setShowDatePicker(false); // hide after picking (for both Android and iOS)
+    setShowDatePicker(false); 
   };
 
   const handleAddItem = async () => {
@@ -71,7 +75,7 @@ const AddItem = () => {
         console.error("Failed to fetch categories:", error);
       } else {
         setCategories(data);
-        if (data.length > 0) setSelectedCategoryId(data[0].id); // default to first
+        if (data.length > 0) setSelectedCategoryId(data[0].id); 
       }
     };
 
@@ -79,7 +83,7 @@ const AddItem = () => {
   }, []);
 
   const debouncedSearch = debounce(async (text) => {
-    console.log("Searching for:", text); // ✅ Log search input
+    console.log("Searching for:", text);
 
     if (text.length < 3) {
       console.log("Search text too short, skipping search.");
@@ -91,7 +95,7 @@ const AddItem = () => {
 
     try {
       const results = await searchProducts(text);
-      console.log("Search results:", results); // ✅ Log returned results
+      console.log("Search results:", results); 
       setSearchResults(results);
     } catch (err) {
       console.error("Search failed:", err);
@@ -102,7 +106,7 @@ const AddItem = () => {
 
   useEffect(() => {
     if (suppressSearch) {
-      setSuppressSearch(false); // reset for next changes
+      setSuppressSearch(false); 
       return;
     }
     debouncedSearch(name);
@@ -110,35 +114,33 @@ const AddItem = () => {
   }, [name]);
 
   const handleSuggestionPress = (product) => {
-    setSuppressSearch(true); // temporarily disable search
+    setSuppressSearch(true); 
     setName(product.name || "");
     setQuantity(product.quantity || "");
-    setSearchResults([]); // clear suggestions
+    setSearchResults([]); 
   };
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener("focus", () => {
-      const scannedItem = navigation
-        .getState()
-        ?.routes?.find((r) => r.name === "AddItem")?.params?.scannedItem;
+ useEffect(() => {
+  if (!route.params?.scannedItem) return;
 
-      if (scannedItem) {
-        setName(scannedItem.name || "");
-        setQuantity(
-          scannedItem.quantity
-            ? scannedItem.quantity.replace(/[^\d.]/g, "")
-            : ""
-        ); // clean qty string to digits only
-        setUnit("pcs"); // optionally default to pcs or you can parse this from scannedItem if available
-        setSelectedCategoryId(null); // optionally map scannedItem.category to your category list and set ID
-        setSuppressSearch(true);
-        setSearchResults([]);
-        navigation.setParams({ scannedItem: null }); // reset param after use
-      }
-    });
+  const scannedItem = route.params.scannedItem;
 
-    return unsubscribe;
-  }, [navigation]);
+  setName(scannedItem.name || "");
+
+  setQuantity(
+    scannedItem.quantity ? scannedItem.quantity.replace(/[^\d.]/g, "") : ""
+  );
+
+  if (scannedItem.unit) setUnit(scannedItem.unit);
+
+  if (scannedItem.mappedCategoryId) setSelectedCategoryId(scannedItem.mappedCategoryId);
+
+  setSuppressSearch(true);
+  setSearchResults([]);
+
+  navigation.setParams({ scannedItem: null });
+}, [route.params?.scannedItem]);
+
 
   return (
     <View style={styles.container}>

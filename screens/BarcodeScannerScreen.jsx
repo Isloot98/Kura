@@ -1,5 +1,12 @@
-import React, { useEffect, useState } from "react";
-import { StyleSheet, Text, View, ActivityIndicator, Alert } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  StyleSheet,
+  Text,
+  View,
+  ActivityIndicator,
+  Alert,
+  TouchableOpacity,
+} from "react-native";
 import {
   Camera,
   useCameraDevice,
@@ -7,15 +14,116 @@ import {
   useCodeScanner,
 } from "react-native-vision-camera";
 import { runOnJS } from "react-native-reanimated";
-import { fetchProductFromBarcode } from "../lib/openFoodFacts"; // Adjust path if needed
+import { useNavigation } from "@react-navigation/native";
 
+import { fetchProductFromBarcode } from "../lib/openFoodFacts";
+import { supabase } from "../lib/supabase";
+
+// ---------- helpers ----------
+const normalize = (s = "") =>
+  s
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+// very lightweight mapping for now (you can expand this)
+const OFF_ALIASES = {
+  dairies: ["dairy", "dairies", "milk", "yogurt", "cheese", "butter", "cream"],
+  meat: ["meat", "poultry", "chicken", "beef", "pork", "lamb"],
+  fish: ["fish", "seafood", "salmon", "tuna"],
+  fruit: ["fruit", "fruits"],
+  veg: ["veg", "vegetable", "vegetables"],
+  bakery: ["bread", "bakery", "baked"],
+  pantry: ["pasta", "rice", "cereal", "flour", "tinned", "canned"],
+  drinks: ["drink", "drinks", "beverage", "beverages", "juice", "water"],
+  frozen: ["frozen"],
+};
+
+function mapOffCategoryToLocalId(offCategory, localCategories) {
+  if (!offCategory || !localCategories?.length) return null;
+
+  const off = normalize(offCategory);
+
+  // 1) direct contains match by category name
+  const direct = localCategories.find((c) => off.includes(normalize(c.name)));
+  if (direct) return direct.id;
+
+  // 2) alias buckets: convert OFF string into a "target" word, then match local names
+  for (const bucketKey of Object.keys(OFF_ALIASES)) {
+    const words = OFF_ALIASES[bucketKey];
+    const hit = words.some((w) => off.includes(normalize(w)));
+    if (!hit) continue;
+
+    // find a local category that contains any of the bucket words
+    const match = localCategories.find((c) => {
+      const cn = normalize(c.name);
+      return words.some((w) => cn.includes(normalize(w)));
+    });
+
+    if (match) return match.id;
+  }
+
+  return null;
+}
+
+function parseQtyUnit(quantityStr) {
+  // Handles: "1000.0 g", "500g", "1 kg", etc.
+  if (!quantityStr) return { quantity: "", unit: "pcs" };
+
+  const s = quantityStr.toString().trim().toLowerCase();
+  const m = s.match(/([\d.,]+)\s*(kg|g|ml|l|pcs|pc|piece|pieces)?/i);
+
+  if (!m) return { quantity: "", unit: "pcs" };
+
+  const qty = (m[1] || "").replace(/,/g, "");
+  let unit = (m[2] || "pcs").toLowerCase();
+
+  if (unit === "pc" || unit === "piece" || unit === "pieces") unit = "pcs";
+
+  // default unknown to pcs
+  if (!["kg", "g", "ml", "l", "pcs"].includes(unit)) unit = "pcs";
+
+  return { quantity: qty, unit };
+}
+
+// ---------- component ----------
 export default function BarcodeScannerScreen() {
+  const navigation = useNavigation();
   const device = useCameraDevice("back");
   const { hasPermission } = useCameraPermission();
 
   const [scanned, setScanned] = useState(false);
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const [categories, setCategories] = useState([]);
+  const [mappedCategoryId, setMappedCategoryId] = useState(null);
+
+  // Fetch local categories once
+  useEffect(() => {
+    const loadCats = async () => {
+      const { data, error } = await supabase
+        .from("pantry_categories")
+        .select("*");
+
+      if (error) {
+        console.error("Failed to fetch categories:", error);
+        return;
+      }
+      setCategories(data || []);
+    };
+
+    loadCats();
+  }, []);
+
+  // When product changes, compute mapped category id
+  useEffect(() => {
+    if (!product) return;
+    const id = mapOffCategoryToLocalId(product.category, categories);
+    setMappedCategoryId(id);
+  }, [product, categories]);
 
   const handleBarcode = async (barcode) => {
     if (scanned || loading) return;
@@ -30,37 +138,106 @@ export default function BarcodeScannerScreen() {
 
       if (productData) {
         setProduct(productData);
-        Alert.alert(
-          "✅ Product Found",
-          `${productData.name || "Unnamed item"} by ${
-            productData.brand || "Unknown brand"
-          }`
-        );
       } else {
-        console.warn("⚠️ No product found for barcode:", barcode);
+        setProduct(null);
         Alert.alert("Not Found", "No product found for this barcode.");
+        setScanned(false);
       }
     } catch (error) {
       console.error("❌ Error fetching product:", error);
       Alert.alert("Error", "Something went wrong while fetching product info.");
+      setScanned(false);
     } finally {
       setLoading(false);
     }
   };
+
   const codeScanner = useCodeScanner({
     codeTypes: ["ean-13", "qr"],
     onCodeScanned: (codes) => {
-      console.log("🔍 Codes scanned:", codes);
-      const value = codes[0]?.value; // <-- was `data`
-
-      if (value) {
-        console.log("📸 Scanned barcode:", value);
-        runOnJS(handleBarcode)(value);
-      } else {
-        console.warn("⚠️ No value in scanned code");
-      }
+      const value = codes[0]?.value;
+      if (value) runOnJS(handleBarcode)(value);
     },
   });
+
+  const scannedItemForAddItem = useMemo(() => {
+    if (!product) return null;
+
+    const { quantity, unit } = parseQtyUnit(product.quantity);
+
+    return {
+      name: product.name || "",
+      quantity: product.quantity || "", // keep original too (your AddItem cleans it)
+      parsedQuantity: quantity,
+      parsedUnit: unit,
+      category: product.category || "",
+      mappedCategoryId: mappedCategoryId || null,
+      brand: product.brand || "",
+    };
+  }, [product, mappedCategoryId]);
+
+  const handlePrefillAddItem = () => {
+    if (!scannedItemForAddItem) return;
+
+    navigation.navigate("AddItem", {
+      scannedItem: {
+        name: scannedItemForAddItem.name,
+        quantity: scannedItemForAddItem.quantity,
+        unit: scannedItemForAddItem.parsedUnit, // optional: use your picker unit
+        category: scannedItemForAddItem.category,
+        mappedCategoryId: scannedItemForAddItem.mappedCategoryId,
+        brand: scannedItemForAddItem.brand,
+      },
+    });
+  };
+
+  const handleAddToPantry = async () => {
+    if (!scannedItemForAddItem) return;
+
+    const { parsedQuantity, parsedUnit } = scannedItemForAddItem;
+
+    if (!scannedItemForAddItem.name) {
+      Alert.alert("Missing name", "This product doesn't have a name. Use Edit to fill it in.");
+      return;
+    }
+
+    // If quantity is missing, force Edit path (or set a default like 1 pcs)
+    if (!parsedQuantity) {
+      Alert.alert("Missing quantity", "Quantity couldn't be parsed. Use Edit to fill it in.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const { error } = await supabase.from("pantry_items").insert([
+        {
+          name: scannedItemForAddItem.name,
+          unit: parsedUnit,
+          quantity: Number(parsedQuantity),
+          expiry_date: null, // leave null, user can edit later
+          category_id: scannedItemForAddItem.mappedCategoryId, // can be null
+        },
+      ]);
+
+      if (error) throw error;
+
+      Alert.alert("Added ✅", `${scannedItemForAddItem.name} added to pantry`);
+      // reset for next scan
+      setProduct(null);
+      setScanned(false);
+    } catch (e) {
+      console.error("Add to pantry failed:", e);
+      Alert.alert("Error", e?.message || "Failed to add item.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleScanAgain = () => {
+    setProduct(null);
+    setScanned(false);
+  };
 
   if (!hasPermission) return <Text>No permission for camera</Text>;
   if (device == null) return <Text>No camera device found</Text>;
@@ -85,12 +262,29 @@ export default function BarcodeScannerScreen() {
         <View style={styles.result}>
           <Text style={styles.productText}>🍽️ Product: {product.name}</Text>
           <Text style={styles.productText}>🏷️ Brand: {product.brand}</Text>
+          <Text style={styles.productText}>📦 Quantity: {product.quantity}</Text>
+          <Text style={styles.productText}>📂 OFF Category: {product.category}</Text>
+
           <Text style={styles.productText}>
-            📦 Quantity: {product.quantity}
+            🔗 Mapped Category:{" "}
+            {mappedCategoryId
+              ? categories.find((c) => c.id === mappedCategoryId)?.name || "Matched"
+              : "No match"}
           </Text>
-          <Text style={styles.productText}>
-            📂 Category: {product.category}
-          </Text>
+
+          <View style={styles.buttonRow}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleAddToPantry}>
+              <Text style={styles.btnText}>Add to Pantry</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.secondaryBtn} onPress={handlePrefillAddItem}>
+              <Text style={styles.btnTextDark}>Edit in AddItem</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity style={styles.linkBtn} onPress={handleScanAgain}>
+            <Text style={styles.linkText}>Scan again</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -106,23 +300,34 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: "center",
   },
-  loadingText: {
-    marginTop: 10,
-    color: "#fff",
-    fontSize: 16,
-  },
+  loadingText: { marginTop: 10, color: "#fff", fontSize: 16 },
   result: {
     position: "absolute",
-    bottom: 40,
+    bottom: 30,
     left: 10,
     right: 10,
     backgroundColor: "#000000aa",
-    padding: 10,
+    padding: 12,
+    borderRadius: 10,
+  },
+  productText: { color: "#fff", fontSize: 15, marginBottom: 4 },
+  buttonRow: { flexDirection: "row", gap: 10, marginTop: 10 },
+  primaryBtn: {
+    flex: 1,
+    backgroundColor: "#4caf50",
+    padding: 12,
     borderRadius: 8,
+    alignItems: "center",
   },
-  productText: {
-    color: "#fff",
-    fontSize: 16,
-    marginBottom: 4,
+  secondaryBtn: {
+    flex: 1,
+    backgroundColor: "#ffffff",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
   },
+  btnText: { color: "white", fontWeight: "800" },
+  btnTextDark: { color: "#111", fontWeight: "800" },
+  linkBtn: { marginTop: 10, alignItems: "center" },
+  linkText: { color: "#ddd", textDecorationLine: "underline" },
 });
