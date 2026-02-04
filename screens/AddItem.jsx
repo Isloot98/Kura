@@ -1,45 +1,45 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
   TouchableOpacity,
-  Button,
   Alert,
+  FlatList,
+  ActivityIndicator,
+  SafeAreaView,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { supabase } from "../lib/supabase";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import debounce from "lodash.debounce";
-import { FlatList, ActivityIndicator } from "react-native";
-import { searchProducts } from "../lib/openFoodFacts.js"; 
-import { useRoute } from "@react-navigation/native";
-
+import { searchProducts } from "../lib/openFoodFacts.js";
 
 const AddItem = () => {
   const navigation = useNavigation();
+  const route = useRoute();
+
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("g");
   const [quantity, setQuantity] = useState("");
   const [expiryDate, setExpiryDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+
   const [categories, setCategories] = useState([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+
   const [searchResults, setSearchResults] = useState([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [suppressSearch, setSuppressSearch] = useState(false);
-  const route = useRoute();
 
-
-  const onChange = (event, selectedDate) => {
-    if (event.type === "set" && selectedDate) {
-      setExpiryDate(selectedDate);
-    }
-    setShowDatePicker(false); 
-  };
-
+  // -------------------------
+  // Save
+  // -------------------------
   const handleAddItem = async () => {
     if (!name || !unit || !quantity) {
       Alert.alert("Please fill in all fields");
@@ -49,7 +49,6 @@ const AddItem = () => {
     const { data, error } = await supabase.from("pantry_items").insert([
       {
         name,
-
         unit,
         quantity: Number(quantity),
         expiry_date: expiryDate.toISOString(),
@@ -66,233 +65,339 @@ const AddItem = () => {
     }
   };
 
+  // -------------------------
+  // Date picker
+  // -------------------------
+  const onChange = (event, selectedDate) => {
+    if (event.type === "set" && selectedDate) setExpiryDate(selectedDate);
+    setShowDatePicker(false);
+  };
+
+  // -------------------------
+  // Categories
+  // -------------------------
   useEffect(() => {
     const fetchCategories = async () => {
-      const { data, error } = await supabase
-        .from("pantry_categories")
-        .select("*");
+      const { data, error } = await supabase.from("pantry_categories").select("*");
       if (error) {
         console.error("Failed to fetch categories:", error);
       } else {
-        setCategories(data);
-        if (data.length > 0) setSelectedCategoryId(data[0].id); 
+        setCategories(data || []);
+        if ((data || []).length > 0) setSelectedCategoryId(data[0].id);
       }
     };
 
     fetchCategories();
   }, []);
 
-  const debouncedSearch = debounce(async (text) => {
-    console.log("Searching for:", text);
+  // -------------------------
+  // OFF suggestions
+  // -------------------------
+  const debouncedSearch = useMemo(
+    () =>
+      debounce(async (text) => {
+        if (text.length < 3) {
+          setSearchResults([]);
+          return;
+        }
 
-    if (text.length < 3) {
-      console.log("Search text too short, skipping search.");
-      setSearchResults([]);
-      return;
-    }
-
-    setLoadingSuggestions(true);
-
-    try {
-      const results = await searchProducts(text);
-      console.log("Search results:", results); 
-      setSearchResults(results);
-    } catch (err) {
-      console.error("Search failed:", err);
-    } finally {
-      setLoadingSuggestions(false);
-    }
-  }, 600);
+        setLoadingSuggestions(true);
+        try {
+          const results = await searchProducts(text);
+          setSearchResults(results);
+        } catch (err) {
+          console.error("Search failed:", err);
+        } finally {
+          setLoadingSuggestions(false);
+        }
+      }, 600),
+    []
+  );
 
   useEffect(() => {
     if (suppressSearch) {
-      setSuppressSearch(false); 
+      setSuppressSearch(false);
       return;
     }
     debouncedSearch(name);
     return () => debouncedSearch.cancel();
-  }, [name]);
+  }, [name, debouncedSearch, suppressSearch]);
 
   const handleSuggestionPress = (product) => {
-    setSuppressSearch(true); 
+    setSuppressSearch(true);
     setName(product.name || "");
     setQuantity(product.quantity || "");
-    setSearchResults([]); 
+    setSearchResults([]);
   };
 
- useEffect(() => {
-  if (!route.params?.scannedItem) return;
+  // -------------------------
+  // Prefill from scanner
+  // -------------------------
+  useEffect(() => {
+    if (!route.params?.scannedItem) return;
 
-  const scannedItem = route.params.scannedItem;
+    const scannedItem = route.params.scannedItem;
 
-  setName(scannedItem.name || "");
+    setSuppressSearch(true);
+    setSearchResults([]);
 
-  setQuantity(
-    scannedItem.quantity ? scannedItem.quantity.replace(/[^\d.]/g, "") : ""
-  );
+    setName(scannedItem.name || "");
+    setQuantity(scannedItem.quantity ? scannedItem.quantity.replace(/[^\d.]/g, "") : "");
+    if (scannedItem.unit) setUnit(scannedItem.unit);
+    if (scannedItem.mappedCategoryId) setSelectedCategoryId(scannedItem.mappedCategoryId);
 
-  if (scannedItem.unit) setUnit(scannedItem.unit);
+    navigation.setParams({ scannedItem: null });
+  }, [route.params?.scannedItem, navigation]);
 
-  if (scannedItem.mappedCategoryId) setSelectedCategoryId(scannedItem.mappedCategoryId);
-
-  setSuppressSearch(true);
-  setSearchResults([]);
-
-  navigation.setParams({ scannedItem: null });
-}, [route.params?.scannedItem]);
-
-
+  // -------------------------
+  // UI
+  // -------------------------
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Add Pantry Item</Text>
-      <TouchableOpacity
-        onPress={() =>
-          navigation.navigate("BarcodeScanner", { from: "AddItem" })
-        }
-        style={{
-          backgroundColor: "#4caf50",
-          padding: 12,
-          borderRadius: 8,
-          marginBottom: 15,
-        }}
+    <SafeAreaView style={styles.safe}>
+      <KeyboardAvoidingView
+        style={styles.safe}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Text
-          style={{ color: "white", textAlign: "center", fontWeight: "bold" }}
+        <ScrollView
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
         >
-          Scan Barcode
-        </Text>
-      </TouchableOpacity>
+          {/* Header text is already "AddItem" in your nav, so keep this subtle */}
+          <Text style={styles.header}>Add Pantry Item</Text>
 
-      <TextInput
-        placeholder="Name (e.g. Apples)"
-        value={name}
-        onChangeText={setName}
-        style={styles.input}
-      />
+          <TouchableOpacity
+            onPress={() => navigation.navigate("BarcodeScanner", { from: "AddItem" })}
+            style={styles.scanButton}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.scanButtonText}>Scan Barcode</Text>
+          </TouchableOpacity>
 
-      {loadingSuggestions && <ActivityIndicator size="small" color="#888" />}
+          <Text style={styles.label}>Name</Text>
+          <TextInput
+            placeholder="e.g. Apples"
+            placeholderTextColor="#9AA0A6"
+            value={name}
+            onChangeText={setName}
+            style={styles.input}
+          />
 
-      {searchResults.length > 0 && (
-        <FlatList
-          data={searchResults}
-          keyExtractor={(item, index) => index.toString()}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              onPress={() => handleSuggestionPress(item)}
-              style={styles.suggestionItem}
-            >
-              <Text>{item.name}</Text>
-              {item.brand && (
-                <Text style={styles.suggestionBrand}>{item.brand}</Text>
-              )}
-            </TouchableOpacity>
+          {/* Suggestions */}
+          {loadingSuggestions && (
+            <View style={styles.suggestLoading}>
+              <ActivityIndicator size="small" />
+              <Text style={styles.suggestLoadingText}>Searching…</Text>
+            </View>
           )}
-          style={styles.suggestionsList}
-        />
-      )}
 
-      <Text style={styles.label}>Category</Text>
-      <Picker
-        selectedValue={selectedCategoryId}
-        onValueChange={(itemValue) => setSelectedCategoryId(itemValue)}
-        style={styles.picker}
-      >
-        {categories.map((cat) => (
-          <Picker.Item key={cat.id} label={cat.name} value={cat.id} />
-        ))}
-      </Picker>
-      <Picker
-        selectedValue={unit}
-        onValueChange={(itemValue) => setUnit(itemValue)}
-        style={styles.picker}
-      >
-        <Picker.Item label="Grams (g)" value="g" />
-        <Picker.Item label="Milliliters (ml)" value="ml" />
-        <Picker.Item label="Pieces (pcs)" value="pcs" />
-        <Picker.Item label="Liters (l)" value="l" />
-        <Picker.Item label="Kilograms (kg)" value="kg" />
-      </Picker>
+          {searchResults.length > 0 && (
+            <View style={styles.suggestionsShell}>
+              <FlatList
+                data={searchResults}
+                keyExtractor={(item, index) => index.toString()}
+                keyboardShouldPersistTaps="handled"
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    onPress={() => handleSuggestionPress(item)}
+                    style={styles.suggestionItem}
+                  >
+                    <Text style={styles.suggestionName}>{item.name}</Text>
+                    {!!item.brand && <Text style={styles.suggestionBrand}>{item.brand}</Text>}
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+          )}
 
-      <TextInput
-        placeholder="Quantity (e.g. 500)"
-        value={quantity}
-        onChangeText={setQuantity}
-        keyboardType="numeric"
-        style={styles.input}
-      />
-      <Text>Expiry Date: {expiryDate.toDateString()}</Text>
-      <Button title="Pick a Date" onPress={() => setShowDatePicker(true)} />
+          <Text style={styles.label}>Category</Text>
+          <View style={styles.pickerShell}>
+            <Picker
+              selectedValue={selectedCategoryId}
+              onValueChange={(v) => setSelectedCategoryId(v)}
+              style={styles.picker}
+              dropdownIconColor="#111"
+            >
+              {categories.map((cat) => (
+                <Picker.Item key={cat.id} label={cat.name} value={cat.id} />
+              ))}
+            </Picker>
+          </View>
 
-      {showDatePicker && (
-        <DateTimePicker
-          value={expiryDate}
-          mode="date"
-          display="default"
-          onChange={onChange}
-        />
-      )}
+          <Text style={styles.label}>Unit</Text>
+          <View style={styles.pickerShell}>
+            <Picker
+              selectedValue={unit}
+              onValueChange={(v) => setUnit(v)}
+              style={styles.picker}
+              dropdownIconColor="#111"
+            >
+              <Picker.Item label="Grams (g)" value="g" />
+              <Picker.Item label="Milliliters (ml)" value="ml" />
+              <Picker.Item label="Pieces (pcs)" value="pcs" />
+              <Picker.Item label="Liters (l)" value="l" />
+              <Picker.Item label="Kilograms (kg)" value="kg" />
+            </Picker>
+          </View>
 
-      <Button title="Submit" onPress={handleAddItem} />
+          <Text style={styles.label}>Quantity</Text>
+          <TextInput
+            placeholder="e.g. 500"
+            placeholderTextColor="#9AA0A6"
+            value={quantity}
+            onChangeText={setQuantity}
+            keyboardType="numeric"
+            style={styles.input}
+          />
 
-      <TouchableOpacity
-        onPress={() => navigation.goBack()}
-        style={styles.backButton}
-      >
-        <Text style={{ color: "#888" }}>Cancel</Text>
-      </TouchableOpacity>
-      <Text style={{ fontSize: 10, color: "#888", alignSelf: "center" }}>
-        Powered by OpenFoodFacts
-      </Text>
-    </View>
+          <View style={styles.row}>
+            <Text style={styles.metaText}>Expiry: {expiryDate.toDateString()}</Text>
+            <TouchableOpacity
+              onPress={() => setShowDatePicker(true)}
+              style={styles.secondaryButton}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.secondaryButtonText}>Pick date</Text>
+            </TouchableOpacity>
+          </View>
+
+          {showDatePicker && (
+            <DateTimePicker
+              value={expiryDate}
+              mode="date"
+              display="default"
+              onChange={onChange}
+            />
+          )}
+
+          <TouchableOpacity
+            onPress={handleAddItem}
+            style={styles.primaryButton}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.primaryButtonText}>Submit</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.cancelButton}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+
+          <Text style={styles.footer}>Powered by OpenFoodFacts</Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: "#fff" },
+
   container: {
-    flex: 1,
     padding: 20,
-    justifyContent: "center",
+    paddingTop: 14,
+    gap: 10,
   },
-  title: {
-    fontSize: 22,
-    fontWeight: "bold",
-    marginBottom: 20,
-    alignSelf: "center",
+
+  header: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111",
+    textAlign: "center",
+    marginBottom: 4,
   },
+
+  label: {
+    fontWeight: "800",
+    color: "#111",
+    marginTop: 6,
+  },
+
   input: {
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 15,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: "#111",
+  },
+
+  scanButton: {
+    backgroundColor: "#16A34A",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  scanButtonText: { color: "#fff", fontWeight: "900", fontSize: 16 },
+
+  pickerShell: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#fff",
   },
   picker: {
-    marginBottom: 15,
+    height: 52,
+    color: "#111",
   },
-  backButton: {
-    marginTop: 20,
-    alignItems: "center",
-  },
-  label: {
-    fontWeight: "bold",
-    marginBottom: 5,
-  },
-  suggestionsList: {
-    maxHeight: 150,
-    backgroundColor: "#f9f9f9",
-    borderColor: "#ccc",
+
+  suggestionsShell: {
     borderWidth: 1,
-    borderRadius: 8,
-    marginBottom: 15,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#fff",
+    maxHeight: 180,
   },
   suggestionItem: {
-    padding: 10,
-    borderBottomColor: "#eee",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
   },
-  suggestionBrand: {
-    color: "#888",
-    fontSize: 12,
+  suggestionName: { fontSize: 15, color: "#111", fontWeight: "700" },
+  suggestionBrand: { color: "#6B7280", fontSize: 12, marginTop: 2 },
+
+  suggestLoading: { flexDirection: "row", alignItems: "center", gap: 8 },
+  suggestLoadingText: { color: "#6B7280", fontWeight: "700" },
+
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 6,
+  },
+  metaText: { color: "#374151", fontSize: 14, fontWeight: "700" },
+
+  secondaryButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#fff",
+  },
+  secondaryButtonText: { color: "#111", fontWeight: "900" },
+
+  primaryButton: {
+    backgroundColor: "#111827",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  primaryButtonText: { color: "#fff", fontWeight: "900", fontSize: 16 },
+
+  cancelButton: { alignItems: "center", paddingVertical: 10 },
+  cancelText: { color: "#6B7280", fontWeight: "800" },
+
+  footer: {
+    fontSize: 11,
+    color: "#9CA3AF",
+    textAlign: "center",
+    marginTop: 6,
   },
 });
 
