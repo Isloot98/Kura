@@ -19,7 +19,6 @@ import { useNavigation } from "@react-navigation/native";
 import { fetchProductFromBarcode } from "../lib/openFoodFacts";
 import { supabase } from "../lib/supabase";
 
-// ---------- helpers ----------
 const normalize = (s = "") =>
   s
     .toLowerCase()
@@ -28,7 +27,6 @@ const normalize = (s = "") =>
     .replace(/\s+/g, " ")
     .trim();
 
-// very lightweight mapping for now (you can expand this)
 const OFF_ALIASES = {
   dairies: ["dairy", "dairies", "milk", "yogurt", "cheese", "butter", "cream"],
   meat: ["meat", "poultry", "chicken", "beef", "pork", "lamb"],
@@ -46,17 +44,14 @@ function mapOffCategoryToLocalId(offCategory, localCategories) {
 
   const off = normalize(offCategory);
 
-  // 1) direct contains match by category name
   const direct = localCategories.find((c) => off.includes(normalize(c.name)));
   if (direct) return direct.id;
 
-  // 2) alias buckets: convert OFF string into a "target" word, then match local names
   for (const bucketKey of Object.keys(OFF_ALIASES)) {
     const words = OFF_ALIASES[bucketKey];
     const hit = words.some((w) => off.includes(normalize(w)));
     if (!hit) continue;
 
-    // find a local category that contains any of the bucket words
     const match = localCategories.find((c) => {
       const cn = normalize(c.name);
       return words.some((w) => cn.includes(normalize(w)));
@@ -68,8 +63,16 @@ function mapOffCategoryToLocalId(offCategory, localCategories) {
   return null;
 }
 
+const isAmbiguousFoodAndBeverageLabel = (label = "") => {
+  const l = normalize(label);
+  const hasFood = l.includes("food");     
+  const hasBeverage = l.includes("beverage"); 
+  const hasAnd = l.includes(" and ");
+  return hasAnd && hasFood && hasBeverage;
+};
+
+
 function parseQtyUnit(quantityStr) {
-  // Handles: "1000.0 g", "500g", "1 kg", etc.
   if (!quantityStr) return { quantity: "", unit: "pcs" };
 
   const s = quantityStr.toString().trim().toLowerCase();
@@ -82,13 +85,11 @@ function parseQtyUnit(quantityStr) {
 
   if (unit === "pc" || unit === "piece" || unit === "pieces") unit = "pcs";
 
-  // default unknown to pcs
   if (!["kg", "g", "ml", "l", "pcs"].includes(unit)) unit = "pcs";
 
   return { quantity: qty, unit };
 }
 
-// ---------- component ----------
 export default function BarcodeScannerScreen() {
   const navigation = useNavigation();
   const device = useCameraDevice("back");
@@ -101,7 +102,6 @@ export default function BarcodeScannerScreen() {
   const [categories, setCategories] = useState([]);
   const [mappedCategoryId, setMappedCategoryId] = useState(null);
 
-  // Fetch local categories once
   useEffect(() => {
     const loadCats = async () => {
       const { data, error } = await supabase
@@ -118,12 +118,21 @@ export default function BarcodeScannerScreen() {
     loadCats();
   }, []);
 
-  // When product changes, compute mapped category id
   useEffect(() => {
-    if (!product) return;
-    const id = mapOffCategoryToLocalId(product.category, categories);
-    setMappedCategoryId(id);
-  }, [product, categories]);
+  if (!product) return;
+
+  let cancelled = false;
+
+  (async () => {
+    const id = await resolveMappedCategoryId(product, categories);
+    if (!cancelled) setMappedCategoryId(id);
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [product, categories]);
+
 
   const handleBarcode = async (barcode) => {
     if (scanned || loading) return;
@@ -152,6 +161,54 @@ export default function BarcodeScannerScreen() {
     }
   };
 
+  async function resolveMappedCategoryId(product, localCategories) {
+  if (!product) return null;
+
+ 
+  const keys = [];
+
+  if (product.categoryTag) keys.push(product.categoryTag);
+
+  if (Array.isArray(product.categoryTags) && product.categoryTags.length) {
+    const reversed = [...product.categoryTags].reverse();
+    for (const t of reversed) keys.push(t);
+  }
+
+  if (product.categoryLabel) keys.push(product.categoryLabel);
+
+  const uniqueKeys = [...new Set(keys.map((k) => (k || "").toLowerCase().trim()))].filter(Boolean);
+
+  for (const offKey of uniqueKeys) {
+    const { data, error } = await supabase
+      .from("category_mappings")
+      .select("pantry_category_id")
+      .eq("off_key", offKey)
+      .maybeSingle();
+
+    if (error) {
+      console.error("category_mappings lookup error:", error);
+      break; 
+    }
+
+    if (data?.pantry_category_id) return data.pantry_category_id;
+  }
+
+ 
+if (product.categoryLabel && isAmbiguousFoodAndBeverageLabel(product.categoryLabel)) {
+  return null;
+}
+
+if (product.categoryLabel) {
+  return mapOffCategoryToLocalId(product.categoryLabel, localCategories);
+}
+
+return null;
+
+
+
+}
+
+
   const codeScanner = useCodeScanner({
     codeTypes: ["ean-13", "qr"],
     onCodeScanned: (codes) => {
@@ -167,10 +224,11 @@ export default function BarcodeScannerScreen() {
 
     return {
       name: product.name || "",
-      quantity: product.quantity || "", // keep original too (your AddItem cleans it)
+      quantity: product.quantity || "", 
       parsedQuantity: quantity,
       parsedUnit: unit,
-      category: product.category || "",
+category: product.categoryLabel || "",
+categoryTag: product.categoryTag || null,
       mappedCategoryId: mappedCategoryId || null,
       brand: product.brand || "",
     };
@@ -183,7 +241,7 @@ export default function BarcodeScannerScreen() {
       scannedItem: {
         name: scannedItemForAddItem.name,
         quantity: scannedItemForAddItem.quantity,
-        unit: scannedItemForAddItem.parsedUnit, // optional: use your picker unit
+        unit: scannedItemForAddItem.parsedUnit, 
         category: scannedItemForAddItem.category,
         mappedCategoryId: scannedItemForAddItem.mappedCategoryId,
         brand: scannedItemForAddItem.brand,
@@ -201,7 +259,6 @@ export default function BarcodeScannerScreen() {
       return;
     }
 
-    // If quantity is missing, force Edit path (or set a default like 1 pcs)
     if (!parsedQuantity) {
       Alert.alert("Missing quantity", "Quantity couldn't be parsed. Use Edit to fill it in.");
       return;
@@ -215,15 +272,14 @@ export default function BarcodeScannerScreen() {
           name: scannedItemForAddItem.name,
           unit: parsedUnit,
           quantity: Number(parsedQuantity),
-          expiry_date: null, // leave null, user can edit later
-          category_id: scannedItemForAddItem.mappedCategoryId, // can be null
+          expiry_date: null, 
+          category_id: scannedItemForAddItem.mappedCategoryId, 
         },
       ]);
 
       if (error) throw error;
 
       Alert.alert("Added ✅", `${scannedItemForAddItem.name} added to pantry`);
-      // reset for next scan
       setProduct(null);
       setScanned(false);
     } catch (e) {
@@ -263,7 +319,8 @@ export default function BarcodeScannerScreen() {
           <Text style={styles.productText}>🍽️ Product: {product.name}</Text>
           <Text style={styles.productText}>🏷️ Brand: {product.brand}</Text>
           <Text style={styles.productText}>📦 Quantity: {product.quantity}</Text>
-          <Text style={styles.productText}>📂 OFF Category: {product.category}</Text>
+<Text style={styles.productText}>📂 OFF Label: {product.categoryLabel}</Text>
+<Text style={styles.productText}>🏷️ OFF Tag: {product.categoryTag}</Text>
 
           <Text style={styles.productText}>
             🔗 Mapped Category:{" "}

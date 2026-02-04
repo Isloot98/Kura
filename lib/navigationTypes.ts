@@ -1,4 +1,3 @@
-// lib/navigationTypes.ts
 
 export interface PantryCategory {
   id: number;
@@ -46,7 +45,6 @@ export type Recipe = {
   recipe_ingredients: RecipeIngredient[];
 };
 
-// Combine *all* your routes into ONE RootStackParamList type:
 export type RootStackParamList = {
   Pantry: undefined;
   AddItem: undefined;
