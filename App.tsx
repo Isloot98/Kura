@@ -24,6 +24,8 @@ import {
   HachiMaruPop_400Regular,
 } from "@expo-google-fonts/hachi-maru-pop";
 import Logo from "./components/Logo";
+import * as Linking from "expo-linking";
+import ResetPasswordScreen from "./screens/ResetPasswordScreens";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -71,9 +73,17 @@ export default function App() {
       </Text>
     </TouchableOpacity>
   );
+  const linking = {
+    prefixes: [Linking.createURL("/"), "kura://"],
+    config: {
+      screens: {
+        ResetPassword: "reset-password",
+      },
+    },
+  };
 
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
       <Stack.Navigator
         screenOptions={{
           headerStyle: {
@@ -83,7 +93,11 @@ export default function App() {
         }}
       >
         {!session || !session.user ? (
-          <Stack.Screen name="Auth" component={Auth} />
+          <Stack.Screen
+            name="Auth"
+            component={Auth}
+            options={{ title: "Log in" }}
+          />
         ) : (
           <>
             <Stack.Screen name="Home" options={{ headerShown: false }}>
@@ -170,6 +184,11 @@ export default function App() {
               name="EditRecipeScreen"
               component={EditRecipeScreen}
               options={{ title: "Edit Recipe" }}
+            />
+            <Stack.Screen
+              name="ResetPassword"
+              component={ResetPasswordScreen}
+              options={{ title: "Reset password" }}
             />
           </>
         )}

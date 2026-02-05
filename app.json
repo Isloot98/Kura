@@ -4,6 +4,9 @@
     "slug": "Kura",
     "version": "1.0.0",
     "orientation": "portrait",
+
+    "scheme": "kura",
+
     "icon": "./assets/kura-logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
@@ -25,7 +28,19 @@
       },
       "edgeToEdgeEnabled": true,
       "permissions": ["android.permission.CAMERA"],
-      "package": "com.isloot.Kura"
+      "package": "com.isloot.Kura",
+
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "kura"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/kura-logo.png"
