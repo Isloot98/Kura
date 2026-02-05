@@ -1,4 +1,3 @@
-// screens/ShoppingListScreen.tsx
 import React, { useState } from "react";
 import {
   View,
@@ -56,9 +55,9 @@ const ShoppingListCard = ({
     ],
   }));
 
-  const itemsCount = list.shopping_list_items?.length || 0;
-  const checkedCount =
-    list.shopping_list_items?.filter((i: any) => i.is_checked).length || 0;
+  const items = list.shopping_list_items ?? [];
+  const itemsCount = items.length;
+  const checkedCount = items.filter((i: any) => i.is_checked).length;
 
   return (
     <Animated.View
@@ -102,7 +101,7 @@ const ShoppingListCard = ({
 
           {itemsCount ? (
             <View style={styles.itemsWrap}>
-              {list.shopping_list_items.map((subItem: any) => (
+              {items.map((subItem: any) => (
                 <View key={subItem.id} style={styles.itemRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.itemName} numberOfLines={1}>
