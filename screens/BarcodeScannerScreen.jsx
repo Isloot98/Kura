@@ -19,7 +19,7 @@ import { useNavigation } from "@react-navigation/native";
 import { fetchProductFromBarcode } from "../lib/openFoodFacts";
 import { supabase } from "../lib/supabase";
 
-const normalize = (s = "") =>
+const normalizeSimple = (s = "") =>
   s
     .toLowerCase()
     .replace(/&/g, "and")
@@ -27,50 +27,13 @@ const normalize = (s = "") =>
     .replace(/\s+/g, " ")
     .trim();
 
-const OFF_ALIASES = {
-  dairies: ["dairy", "dairies", "milk", "yogurt", "cheese", "butter", "cream"],
-  meat: ["meat", "poultry", "chicken", "beef", "pork", "lamb"],
-  fish: ["fish", "seafood", "salmon", "tuna"],
-  fruit: ["fruit", "fruits"],
-  veg: ["veg", "vegetable", "vegetables"],
-  bakery: ["bread", "bakery", "baked"],
-  pantry: ["pasta", "rice", "cereal", "flour", "tinned", "canned"],
-  drinks: ["drink", "drinks", "beverage", "beverages", "juice", "water"],
-  frozen: ["frozen"],
-};
-
-function mapOffCategoryToLocalId(offCategory, localCategories) {
-  if (!offCategory || !localCategories?.length) return null;
-
-  const off = normalize(offCategory);
-
-  const direct = localCategories.find((c) => off.includes(normalize(c.name)));
-  if (direct) return direct.id;
-
-  for (const bucketKey of Object.keys(OFF_ALIASES)) {
-    const words = OFF_ALIASES[bucketKey];
-    const hit = words.some((w) => off.includes(normalize(w)));
-    if (!hit) continue;
-
-    const match = localCategories.find((c) => {
-      const cn = normalize(c.name);
-      return words.some((w) => cn.includes(normalize(w)));
-    });
-
-    if (match) return match.id;
-  }
-
-  return null;
-}
-
 const isAmbiguousFoodAndBeverageLabel = (label = "") => {
-  const l = normalize(label);
-  const hasFood = l.includes("food");     
-  const hasBeverage = l.includes("beverage"); 
+  const l = normalizeSimple(label);
+  const hasFood = l.includes("food");
+  const hasBeverage = l.includes("beverage");
   const hasAnd = l.includes(" and ");
   return hasAnd && hasFood && hasBeverage;
 };
-
 
 function parseQtyUnit(quantityStr) {
   if (!quantityStr) return { quantity: "", unit: "pcs" };
@@ -84,7 +47,6 @@ function parseQtyUnit(quantityStr) {
   let unit = (m[2] || "pcs").toLowerCase();
 
   if (unit === "pc" || unit === "piece" || unit === "pieces") unit = "pcs";
-
   if (!["kg", "g", "ml", "l", "pcs"].includes(unit)) unit = "pcs";
 
   return { quantity: qty, unit };
@@ -119,20 +81,19 @@ export default function BarcodeScannerScreen() {
   }, []);
 
   useEffect(() => {
-  if (!product) return;
+    if (!product) return;
 
-  let cancelled = false;
+    let cancelled = false;
 
-  (async () => {
-    const id = await resolveMappedCategoryId(product, categories);
-    if (!cancelled) setMappedCategoryId(id);
-  })();
+    (async () => {
+      const id = await resolveMappedCategoryId(product, categories);
+      if (!cancelled) setMappedCategoryId(id);
+    })();
 
-  return () => {
-    cancelled = true;
-  };
-}, [product, categories]);
-
+    return () => {
+      cancelled = true;
+    };
+  }, [product, categories]);
 
   const handleBarcode = async (barcode) => {
     if (scanned || loading) return;
@@ -162,52 +123,47 @@ export default function BarcodeScannerScreen() {
   };
 
   async function resolveMappedCategoryId(product, localCategories) {
-  if (!product) return null;
+    if (!product) return null;
 
- 
-  const keys = [];
+    const keys = [];
 
-  if (product.categoryTag) keys.push(product.categoryTag);
+    if (product.categoryTag) keys.push(product.categoryTag);
 
-  if (Array.isArray(product.categoryTags) && product.categoryTags.length) {
-    const reversed = [...product.categoryTags].reverse();
-    for (const t of reversed) keys.push(t);
-  }
-
-  if (product.categoryLabel) keys.push(product.categoryLabel);
-
-  const uniqueKeys = [...new Set(keys.map((k) => (k || "").toLowerCase().trim()))].filter(Boolean);
-
-  for (const offKey of uniqueKeys) {
-    const { data, error } = await supabase
-      .from("category_mappings")
-      .select("pantry_category_id")
-      .eq("off_key", offKey)
-      .maybeSingle();
-
-    if (error) {
-      console.error("category_mappings lookup error:", error);
-      break; 
+    if (Array.isArray(product.categoryTags) && product.categoryTags.length) {
+      const reversed = [...product.categoryTags].reverse();
+      for (const t of reversed) keys.push(t);
     }
 
-    if (data?.pantry_category_id) return data.pantry_category_id;
+    if (product.categoryLabel) keys.push(product.categoryLabel);
+
+    const uniqueKeys = [
+      ...new Set(keys.map((k) => (k || "").toLowerCase().trim())),
+    ].filter(Boolean);
+
+    for (const offKey of uniqueKeys) {
+      const { data, error } = await supabase
+        .from("category_mappings")
+        .select("pantry_category_id")
+        .eq("off_key", offKey)
+        .maybeSingle();
+
+      if (error) {
+        console.error("category_mappings lookup error:", error);
+        break;
+      }
+
+      if (data?.pantry_category_id) return data.pantry_category_id;
+    }
+
+    if (
+      product.categoryLabel &&
+      isAmbiguousFoodAndBeverageLabel(product.categoryLabel)
+    ) {
+      return null;
+    }
+
+    return null;
   }
-
- 
-if (product.categoryLabel && isAmbiguousFoodAndBeverageLabel(product.categoryLabel)) {
-  return null;
-}
-
-if (product.categoryLabel) {
-  return mapOffCategoryToLocalId(product.categoryLabel, localCategories);
-}
-
-return null;
-
-
-
-}
-
 
   const codeScanner = useCodeScanner({
     codeTypes: ["ean-13", "qr"],
@@ -224,11 +180,11 @@ return null;
 
     return {
       name: product.name || "",
-      quantity: product.quantity || "", 
+      quantity: product.quantity || "",
       parsedQuantity: quantity,
       parsedUnit: unit,
-category: product.categoryLabel || "",
-categoryTag: product.categoryTag || null,
+      category: product.categoryLabel || "",
+      categoryTag: product.categoryTag || null,
       mappedCategoryId: mappedCategoryId || null,
       brand: product.brand || "",
     };
@@ -241,7 +197,7 @@ categoryTag: product.categoryTag || null,
       scannedItem: {
         name: scannedItemForAddItem.name,
         quantity: scannedItemForAddItem.quantity,
-        unit: scannedItemForAddItem.parsedUnit, 
+        unit: scannedItemForAddItem.parsedUnit,
         category: scannedItemForAddItem.category,
         mappedCategoryId: scannedItemForAddItem.mappedCategoryId,
         brand: scannedItemForAddItem.brand,
@@ -255,12 +211,18 @@ categoryTag: product.categoryTag || null,
     const { parsedQuantity, parsedUnit } = scannedItemForAddItem;
 
     if (!scannedItemForAddItem.name) {
-      Alert.alert("Missing name", "This product doesn't have a name. Use Edit to fill it in.");
+      Alert.alert(
+        "Missing name",
+        "This product doesn't have a name. Use Edit to fill it in.",
+      );
       return;
     }
 
     if (!parsedQuantity) {
-      Alert.alert("Missing quantity", "Quantity couldn't be parsed. Use Edit to fill it in.");
+      Alert.alert(
+        "Missing quantity",
+        "Quantity couldn't be parsed. Use Edit to fill it in.",
+      );
       return;
     }
 
@@ -272,8 +234,8 @@ categoryTag: product.categoryTag || null,
           name: scannedItemForAddItem.name,
           unit: parsedUnit,
           quantity: Number(parsedQuantity),
-          expiry_date: null, 
-          category_id: scannedItemForAddItem.mappedCategoryId, 
+          expiry_date: null,
+          category_id: scannedItemForAddItem.mappedCategoryId,
         },
       ]);
 
@@ -318,23 +280,36 @@ categoryTag: product.categoryTag || null,
         <View style={styles.result}>
           <Text style={styles.productText}>🍽️ Product: {product.name}</Text>
           <Text style={styles.productText}>🏷️ Brand: {product.brand}</Text>
-          <Text style={styles.productText}>📦 Quantity: {product.quantity}</Text>
-<Text style={styles.productText}>📂 OFF Label: {product.categoryLabel}</Text>
-<Text style={styles.productText}>🏷️ OFF Tag: {product.categoryTag}</Text>
+          <Text style={styles.productText}>
+            📦 Quantity: {product.quantity}
+          </Text>
+          <Text style={styles.productText}>
+            📂 OFF Label: {product.categoryLabel}
+          </Text>
+          <Text style={styles.productText}>
+            🏷️ OFF Tag: {product.categoryTag}
+          </Text>
 
           <Text style={styles.productText}>
             🔗 Mapped Category:{" "}
             {mappedCategoryId
-              ? categories.find((c) => c.id === mappedCategoryId)?.name || "Matched"
+              ? categories.find((c) => c.id === mappedCategoryId)?.name ||
+                "Matched"
               : "No match"}
           </Text>
 
           <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.primaryBtn} onPress={handleAddToPantry}>
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={handleAddToPantry}
+            >
               <Text style={styles.btnText}>Add to Pantry</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.secondaryBtn} onPress={handlePrefillAddItem}>
+            <TouchableOpacity
+              style={styles.secondaryBtn}
+              onPress={handlePrefillAddItem}
+            >
               <Text style={styles.btnTextDark}>Edit in AddItem</Text>
             </TouchableOpacity>
           </View>

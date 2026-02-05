@@ -1,7 +1,7 @@
 import "react-native-reanimated";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"; // Import Tab Navigator
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import "react-native-url-polyfill/auto";
 import { useState, useEffect } from "react";
 import { supabase } from "./lib/supabase";
@@ -9,7 +9,7 @@ import Auth from "./components/Auth";
 import PantryScreen from "./screens/PantryScreen";
 import RecipesScreen from "./screens/RecipesScreen";
 import ShoppingListScreen from "./screens/ShoppingListScreen";
-import { View, Text, StyleSheet, Button } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { Session } from "@supabase/supabase-js";
 import AddItemScreen from "./screens/AddItem";
 import AddShoppingListScreen from "./screens/AddShoppingList";
@@ -18,25 +18,24 @@ import AddRecipeScreen from "./screens/AddRecipeScreen";
 import EditRecipeScreen from "./screens/EditRecipeScreen";
 import BarcodeScannerScreen from "./screens/BarcodeScannerScreen";
 import { TouchableOpacity } from "react-native";
-import { Ionicons } from "@expo/vector-icons"; // Ensure expo install @expo/vector-icons
+import { Ionicons } from "@expo/vector-icons";
 import {
   useFonts,
   HachiMaruPop_400Regular,
 } from "@expo-google-fonts/hachi-maru-pop";
+import Logo from "./components/Logo";
 
 const Stack = createNativeStackNavigator();
-const Tab = createBottomTabNavigator(); // Create Tab Navigator
+const Tab = createBottomTabNavigator();
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    // Check session on load
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
     });
 
-    // Listen for auth state changes
     supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
@@ -78,67 +77,47 @@ export default function App() {
       <Stack.Navigator
         screenOptions={{
           headerStyle: {
-            backgroundColor: "#fcba03", // Example: you can change background if needed
+            backgroundColor: "#fcba03",
           },
           headerTitleAlign: "center",
-          // Optional: to center the header title
         }}
       >
-        {/* Auth Screen for Unauthenticated Users */}
         {!session || !session.user ? (
           <Stack.Screen name="Auth" component={Auth} />
         ) : (
           <>
-            <Stack.Screen
-              name="Home"
-              options={{ headerShown: false }} // Hide header for the tab navigation
-            >
+            <Stack.Screen name="Home" options={{ headerShown: false }}>
               {() => (
                 <Tab.Navigator
-                
                   screenOptions={{
                     tabBarStyle: {
                       height: 85,
                     },
+
                     headerStyle: {
                       backgroundColor: "#f4511e",
                       height: 110,
                     },
-                    headerTitleStyle: {
-                      fontWeight: "bold",
-                      paddingTop: 40,
-                    },
-                    headerRight: () => <SignOutButton />, // Set it once here
+
+                    headerTitle: "",
+
+                    headerRight: () => <SignOutButton />,
                     headerRightContainerStyle: {
                       paddingRight: 10,
-                      paddingBottom: 10,
                     },
+
+                    headerLeft: () => <Logo size={100} />,
                     headerLeftContainerStyle: {
                       paddingLeft: 10,
-                      paddingTop: 20,
+                      paddingBottom: 10,
                     },
-                    headerLeft: () => (
-                      <View style={{ position: "absolute", left: 10, top: -5 }}>
-                        <Text
-                          style={{
-                            fontFamily: "HachiMaruPop_400Regular",
-                            fontSize: 26,
-                            color: "#fff",
-                            includeFontPadding: false,
-                          }}
-                        >
-                          Kura
-                        </Text>
-                      </View>
-                    ),
                   }}
                 >
-                  {/* Define Tab Screens */}
                   <Tab.Screen
                     name="Pantry"
                     component={PantryScreen}
                     options={{
-                      tabBarIcon: () => <Text>🍞</Text>, // Example icon
+                      tabBarIcon: () => <Text>🍞</Text>,
                       headerTitle: "",
                     }}
                   />
@@ -146,7 +125,7 @@ export default function App() {
                     name="Recipes"
                     component={RecipesScreen}
                     options={{
-                      tabBarIcon: () => <Text>🥘</Text>, // Example icon
+                      tabBarIcon: () => <Text>🥘</Text>,
                       headerTitle: "",
                     }}
                   />
@@ -154,14 +133,19 @@ export default function App() {
                     name="Shopping List"
                     component={ShoppingListScreen}
                     options={{
-                      tabBarIcon: () => <Text>🛒</Text>, // Example icon
+                      tabBarIcon: () => <Text>🛒</Text>,
                       headerTitle: "",
                     }}
                   />
                 </Tab.Navigator>
               )}
             </Stack.Screen>
-            <Stack.Screen name="AddItem" component={AddItemScreen} />
+
+            <Stack.Screen
+              name="AddItem"
+              component={AddItemScreen}
+              options={{ title: "Add pantry item" }}
+            />
             <Stack.Screen
               name="BarcodeScanner"
               component={BarcodeScannerScreen}
@@ -170,6 +154,7 @@ export default function App() {
             <Stack.Screen
               name="AddShoppingList"
               component={AddShoppingListScreen}
+              options={{ title: "Add Shopping List" }}
             />
             <Stack.Screen
               name="EditShoppingList"

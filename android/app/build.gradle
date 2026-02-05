@@ -87,7 +87,7 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.isloot.Kura"
+    namespace 'com.isloot.Kura'
     defaultConfig {
         applicationId 'com.isloot.Kura'
         minSdkVersion rootProject.ext.minSdkVersion
@@ -150,8 +150,6 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
-    implementation 'com.google.mlkit:barcode-scanning:17.0.2'
-
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
