@@ -79,7 +79,6 @@ export default function Auth() {
         <View style={styles.container}>
           <View style={styles.header}>
             <Logo size={90} />
-            <Text style={styles.title}>Kura</Text>
             <Text style={styles.sub}>
               Log in to manage your pantry, recipes, and lists.
             </Text>

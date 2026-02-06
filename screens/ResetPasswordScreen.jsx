@@ -40,10 +40,13 @@ export default function ResetPasswordScreen({ navigation }) {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
 
+      await supabase.auth.signOut();
+
       Alert.alert("Done ✅", "Your password has been updated.", [
         {
           text: "Back to login",
-          onPress: () => navigation.navigate("Auth"),
+          onPress: () =>
+            navigation.reset({ index: 0, routes: [{ name: "Auth" }] }),
         },
       ]);
     } catch (e) {
@@ -107,7 +110,10 @@ export default function ResetPasswordScreen({ navigation }) {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => navigation.navigate("Auth")}
+              onPress={async () => {
+                await supabase.auth.signOut();
+                navigation.reset({ index: 0, routes: [{ name: "Auth" }] });
+              }}
               style={styles.linkBtn}
             >
               <Text style={styles.linkText}>Back to login</Text>
