@@ -14,6 +14,7 @@ import {
 import { supabase } from "../lib/supabase";
 import Logo from "./Logo";
 import { Ionicons } from "@expo/vector-icons";
+import * as Linking from "expo-linking";
 
 export default function Auth() {
   const [email, setEmail] = useState("");
@@ -47,14 +48,19 @@ export default function Auth() {
   }
 
   async function resetPassword() {
-    if (!email.trim()) {
+    const trimmed = email.trim();
+    if (!trimmed) {
       Alert.alert("Enter your email", "Type your email first, then tap reset.");
       return;
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: "kura://reset-password",
+
+    const redirectTo = Linking.createURL("reset-password");
+    console.log("redirectTo:", redirectTo);
+
+    const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
+      redirectTo,
     });
 
     setLoading(false);

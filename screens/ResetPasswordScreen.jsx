@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,24 +9,75 @@ import {
   SafeAreaView,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Logo from "../components/Logo";
 import { Ionicons } from "@expo/vector-icons";
 
-export default function ResetPasswordScreen({ navigation }) {
+export default function ResetPasswordScreen({ route }) {
+  const onDone = route?.params?.onDone;
+
+  console.log("[ResetPasswordScreen] render", {
+    hasRoute: !!route,
+    routeName: route?.name,
+    paramKeys: route?.params ? Object.keys(route.params) : null,
+    hasOnDone: typeof onDone === "function",
+  });
+
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    console.log("[ResetPasswordScreen] mounted");
+
+    supabase.auth.getSession().then(({ data }) => {
+      console.log("[ResetPasswordScreen] getSession result", {
+        hasSession: !!data.session,
+        userId: data.session?.user?.id,
+        email: data.session?.user?.email,
+      });
+
+      if (!data.session) {
+        Alert.alert(
+          "Link expired",
+          "Please request a new password reset email and try again.",
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                if (typeof onDone === "function") onDone();
+              },
+            },
+          ],
+        );
+      }
+    });
+
+    return () => {
+      console.log("[ResetPasswordScreen] unmounted");
+    };
+  }, []);
+
   const canSubmit = useMemo(() => {
-    if (!password || !confirm) return false;
-    if (password.length < 6) return false;
-    if (password !== confirm) return false;
-    return true;
+    const ok =
+      !!password && !!confirm && password.length >= 6 && password === confirm;
+    console.log("[ResetPasswordScreen] canSubmit recalculated", {
+      passwordLen: password.length,
+      confirmLen: confirm.length,
+      matches: password === confirm,
+      ok,
+    });
+    return ok;
   }, [password, confirm]);
 
   const handleReset = async () => {
+    console.log("[ResetPasswordScreen] handleReset pressed", {
+      canSubmit,
+      loading,
+    });
+
     if (!canSubmit) {
       Alert.alert(
         "Check your password",
@@ -36,24 +87,56 @@ export default function ResetPasswordScreen({ navigation }) {
     }
 
     setLoading(true);
+    console.log("[ResetPasswordScreen] starting updateUser");
+
     try {
       const { error } = await supabase.auth.updateUser({ password });
+      console.log("[ResetPasswordScreen] updateUser result", {
+        ok: !error,
+        error: error ? { message: error.message, name: error.name } : null,
+      });
       if (error) throw error;
 
-      await supabase.auth.signOut();
+      console.log("[ResetPasswordScreen] signing out…");
+      const { error: signOutError } = await supabase.auth.signOut();
+      console.log("[ResetPasswordScreen] signOut result", {
+        ok: !signOutError,
+        error: signOutError
+          ? { message: signOutError.message, name: signOutError.name }
+          : null,
+      });
 
-      Alert.alert("Done ✅", "Your password has been updated.", [
-        {
-          text: "Back to login",
-          onPress: () =>
-            navigation.reset({ index: 0, routes: [{ name: "Auth" }] }),
-        },
-      ]);
+      setPassword("");
+      setConfirm("");
+
+      if (typeof onDone === "function") {
+        try {
+          onDone();
+        } catch (e) {
+          console.warn("[ResetPasswordScreen] onDone threw", e);
+        }
+      }
+
+      Alert.alert("Done ✅", "Your password has been updated.");
     } catch (e) {
+      console.log("[ResetPasswordScreen] reset failed (caught)", e);
       Alert.alert("Reset failed", e?.message || "Something went wrong.");
     } finally {
+      console.log("[ResetPasswordScreen] handleReset finished");
       setLoading(false);
     }
+  };
+
+  const backToLogin = async () => {
+    console.log("[ResetPasswordScreen] backToLogin pressed");
+
+    const { error } = await supabase.auth.signOut();
+    console.log("[ResetPasswordScreen] signOut (backToLogin) result", {
+      ok: !error,
+      error: error ? { message: error.message, name: error.name } : null,
+    });
+
+    if (typeof onDone === "function") onDone();
   };
 
   return (
@@ -81,6 +164,7 @@ export default function ResetPasswordScreen({ navigation }) {
               secureTextEntry
               autoCapitalize="none"
               style={styles.input}
+              editable={!loading}
             />
 
             <Text style={styles.label}>Confirm password</Text>
@@ -92,6 +176,7 @@ export default function ResetPasswordScreen({ navigation }) {
               secureTextEntry
               autoCapitalize="none"
               style={styles.input}
+              editable={!loading}
             />
 
             <TouchableOpacity
@@ -103,19 +188,17 @@ export default function ResetPasswordScreen({ navigation }) {
                 (loading || !canSubmit) && styles.primaryBtnDisabled,
               ]}
             >
-              <Ionicons name="key-outline" size={18} color="#fff" />
-              <Text style={styles.primaryText}>
-                {loading ? "Updating..." : "Update password"}
-              </Text>
+              {loading ? (
+                <ActivityIndicator />
+              ) : (
+                <>
+                  <Ionicons name="key-outline" size={18} color="#fff" />
+                  <Text style={styles.primaryText}>Update password</Text>
+                </>
+              )}
             </TouchableOpacity>
 
-            <TouchableOpacity
-              onPress={async () => {
-                await supabase.auth.signOut();
-                navigation.reset({ index: 0, routes: [{ name: "Auth" }] });
-              }}
-              style={styles.linkBtn}
-            >
+            <TouchableOpacity onPress={backToLogin} style={styles.linkBtn}>
               <Text style={styles.linkText}>Back to login</Text>
             </TouchableOpacity>
           </View>
@@ -132,12 +215,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, justifyContent: "center" },
 
   header: { alignItems: "center", marginBottom: 14 },
-  title: {
-    marginTop: 10,
-    fontSize: 20,
-    fontWeight: "900",
-    color: "#111827",
-  },
+  title: { marginTop: 10, fontSize: 20, fontWeight: "900", color: "#111827" },
   sub: {
     marginTop: 6,
     fontSize: 13,
@@ -161,10 +239,10 @@ const styles = StyleSheet.create({
   },
 
   label: {
-    fontWeight: "900",
-    color: "#111827",
     marginTop: 10,
     marginBottom: 6,
+    fontWeight: "900",
+    color: "#111827",
   },
   input: {
     borderWidth: 1,
@@ -187,7 +265,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
-  primaryBtnDisabled: { opacity: 0.5 },
+  primaryBtnDisabled: {
+    opacity: 0.6,
+  },
   primaryText: { color: "#fff", fontWeight: "900", fontSize: 16 },
 
   linkBtn: { marginTop: 12, alignItems: "center" },

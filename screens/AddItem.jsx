@@ -19,7 +19,6 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import debounce from "lodash.debounce";
 import { searchProducts } from "../lib/openFoodFacts.js";
 import { Ionicons } from "@expo/vector-icons";
-
 import Animated, {
   FadeInDown,
   FadeOut,
@@ -30,11 +29,9 @@ import Animated, {
 
 const PressableScale = ({ children, onPress, style }) => {
   const [pressed, setPressed] = useState(false);
-
   const aStyle = useAnimatedStyle(() => ({
     transform: [{ scale: withTiming(pressed ? 0.98 : 1, { duration: 120 }) }],
   }));
-
   return (
     <TouchableOpacity
       activeOpacity={1}
@@ -65,28 +62,119 @@ const AddItem = () => {
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [suppressSearch, setSuppressSearch] = useState(false);
 
+  const [itemGroups, setItemGroups] = useState([]);
+  const [itemGroupName, setItemGroupName] = useState("");
+  const [selectedGroupId, setSelectedGroupId] = useState(null);
+  const [newGroupName, setNewGroupName] = useState("");
+
+  useEffect(() => {
+    const fetchCategories = async () => {
+      const { data, error } = await supabase
+        .from("pantry_categories")
+        .select("*")
+        .order("name");
+      if (error) console.error("Failed to fetch categories:", error);
+      else {
+        setCategories(data || []);
+        if ((data || []).length > 0) setSelectedCategoryId(data[0].id);
+      }
+    };
+    fetchCategories();
+  }, []);
+
+  const fetchItemGroups = async () => {
+    const { data, error } = await supabase
+      .from("pantry_groups")
+      .select("id, name")
+      .order("name", { ascending: true });
+    if (error) console.error("Failed to fetch item groups:", error);
+    else setItemGroups(data || []);
+  };
+
+  useEffect(() => {
+    fetchItemGroups();
+  }, []);
+
+  const handleCreateNewGroup = async () => {
+    if (!newGroupName.trim()) return null;
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert("Error", "You must be logged in to create a group");
+        return null;
+      }
+
+      const { data: newGroup, error } = await supabase
+        .from("pantry_groups")
+        .insert([{ group_name: newGroupName.trim(), user_id: user.id }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setItemGroups((prev) => [...prev, newGroup]);
+      setSelectedGroupId(newGroup.id);
+      setItemGroupName("");
+      setNewGroupName("");
+
+      return newGroup.id;
+    } catch (err) {
+      console.error("Failed to create new group:", err);
+      Alert.alert("Error", "Could not create new item group");
+      return null;
+    }
+  };
+
   const handleAddItem = async () => {
     if (!name || !unit || !quantity) {
-      Alert.alert("Please fill in all fields");
+      Alert.alert("Please fill in all required fields");
       return;
     }
 
-    const { data, error } = await supabase.from("pantry_items").insert([
-      {
-        name,
-        unit,
-        quantity: Number(quantity),
-        expiry_date: expiryDate.toISOString(),
-        category_id: selectedCategoryId,
-      },
-    ]);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert("Error", "You must be logged in to add items");
+        return;
+      }
 
-    if (error) {
-      console.error("Insert error:", error);
-      Alert.alert("Error adding item", error.message);
-    } else {
-      console.log("Item added:", data);
-      navigation.navigate("Home");
+      let groupId = selectedGroupId;
+      if (!groupId && newGroupName) groupId = await handleCreateNewGroup();
+      if (!groupId) {
+        Alert.alert("Select an Item Group or create a new one");
+        return;
+      }
+
+      const canonicalName = name.toLowerCase().trim();
+      const { data: newItem, error } = await supabase
+        .from("pantry_items")
+        .insert([
+          {
+            name: canonicalName,
+            quantity: Number(quantity),
+            unit,
+            expiry_date: expiryDate.toISOString(),
+            category_id: selectedCategoryId,
+            user_id: user.id,
+            group_id: groupId,
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      Alert.alert("Success", "Item added successfully");
+      fetchItemGroups();
+      navigation.navigate("MainTabs", { screen: "Pantry" });
+    } catch (err) {
+      console.error("Failed to add item:", err);
+      Alert.alert("Error adding item", err.message);
     }
   };
 
@@ -95,31 +183,10 @@ const AddItem = () => {
     setShowDatePicker(false);
   };
 
-  useEffect(() => {
-    const fetchCategories = async () => {
-      const { data, error } = await supabase
-        .from("pantry_categories")
-        .select("*");
-
-      if (error) {
-        console.error("Failed to fetch categories:", error);
-      } else {
-        setCategories(data || []);
-        if ((data || []).length > 0) setSelectedCategoryId((data || [])[0].id);
-      }
-    };
-
-    fetchCategories();
-  }, []);
-
   const debouncedSearch = useMemo(
     () =>
       debounce(async (text) => {
-        if (text.length < 3) {
-          setSearchResults([]);
-          return;
-        }
-
+        if (text.length < 3) return setSearchResults([]);
         setLoadingSuggestions(true);
         try {
           const results = await searchProducts(text);
@@ -145,18 +212,15 @@ const AddItem = () => {
   const handleSuggestionPress = (product) => {
     setSuppressSearch(true);
     setName(product.name || "");
-    setQuantity(product.quantity || "");
+    setQuantity((product.quantity || "").replace(/[^\d.]/g, ""));
     setSearchResults([]);
   };
 
   useEffect(() => {
     if (!route.params?.scannedItem) return;
-
     const scannedItem = route.params.scannedItem;
-
     setSuppressSearch(true);
     setSearchResults([]);
-
     setName(scannedItem.name || "");
     setQuantity(
       scannedItem.quantity ? scannedItem.quantity.replace(/[^\d.]/g, "") : "",
@@ -164,11 +228,12 @@ const AddItem = () => {
     if (scannedItem.unit) setUnit(scannedItem.unit);
     if (scannedItem.mappedCategoryId)
       setSelectedCategoryId(scannedItem.mappedCategoryId);
-
     navigation.setParams({ scannedItem: null });
   }, [route.params?.scannedItem, navigation]);
 
-  const hasSuggestions = searchResults.length > 0;
+  const filteredGroups = itemGroups.filter((g) =>
+    g.name.toLowerCase().includes(itemGroupName.toLowerCase()),
+  );
 
   const Header = (
     <View style={{ gap: 12 }}>
@@ -186,7 +251,6 @@ const AddItem = () => {
 
       <View style={styles.card}>
         <Text style={styles.label}>Name</Text>
-
         <View style={styles.inputWithIcon}>
           <Ionicons name="search" size={18} color="#6B7280" />
           <TextInput
@@ -201,7 +265,6 @@ const AddItem = () => {
             <TouchableOpacity
               onPress={() => setName("")}
               style={styles.clearBtn}
-              activeOpacity={0.85}
             >
               <Ionicons name="close-circle" size={18} color="#9CA3AF" />
             </TouchableOpacity>
@@ -215,7 +278,7 @@ const AddItem = () => {
           </View>
         )}
 
-        {hasSuggestions && (
+        {searchResults.length > 0 && (
           <Animated.View
             entering={FadeInDown.duration(160)}
             exiting={FadeOut.duration(120)}
@@ -223,7 +286,6 @@ const AddItem = () => {
             style={{ marginTop: 10 }}
           >
             <Text style={styles.suggestionsTitle}>Suggestions</Text>
-
             <View style={styles.suggestionsBox}>
               {searchResults.slice(0, 8).map((item, index) => (
                 <TouchableOpacity
@@ -233,12 +295,8 @@ const AddItem = () => {
                     styles.suggestionRow,
                     index === 7 ? { borderBottomWidth: 0 } : null,
                   ]}
-                  activeOpacity={0.85}
                 >
                   <Text style={styles.suggestionName}>{item.name}</Text>
-                  {!!item.brand && (
-                    <Text style={styles.suggestionBrand}>{item.brand}</Text>
-                  )}
                 </TouchableOpacity>
               ))}
             </View>
@@ -287,7 +345,6 @@ const AddItem = () => {
           onChangeText={setQuantity}
           keyboardType="numeric"
           style={styles.qtyInput}
-          returnKeyType="done"
         />
 
         <View style={styles.row}>
@@ -312,6 +369,74 @@ const AddItem = () => {
         )}
       </View>
 
+      <View style={styles.card}>
+        <Text style={styles.label}>Select Item Group</Text>
+        <View style={styles.inputWithIcon}>
+          <Ionicons name="search" size={18} color="#6B7280" />
+          <TextInput
+            placeholder="Search Item Groups..."
+            placeholderTextColor="#9AA0A6"
+            value={itemGroupName}
+            onChangeText={(text) => {
+              setItemGroupName(text);
+              setSelectedGroupId(null);
+            }}
+            style={styles.input}
+          />
+        </View>
+
+        <FlatList
+          data={filteredGroups}
+          keyExtractor={(g) => g.id.toString()}
+          style={{ maxHeight: 150, marginTop: 8 }}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              onPress={() => setSelectedGroupId(item.id)}
+              style={[
+                styles.suggestionRow,
+                selectedGroupId === item.id
+                  ? { backgroundColor: "#E5E7EB" }
+                  : null,
+              ]}
+            >
+              <Text style={styles.suggestionName}>{item.name}</Text>
+            </TouchableOpacity>
+          )}
+        />
+
+        <Text style={[styles.label, { marginTop: 12 }]}>
+          Or create new Item Group
+        </Text>
+        <TextInput
+          placeholder="New Item Group name"
+          placeholderTextColor="#9AA0A6"
+          value={newGroupName}
+          onChangeText={(text) => {
+            setNewGroupName(text);
+            setSelectedGroupId(null);
+          }}
+          style={styles.input}
+        />
+
+        {!!newGroupName.trim() && (
+          <PressableScale
+            onPress={async () => {
+              const id = await handleCreateNewGroup();
+              if (id) Alert.alert("Item Group created!");
+            }}
+          >
+            <View
+              style={[
+                styles.primaryButton,
+                { marginTop: 8, backgroundColor: "#3B82F6" },
+              ]}
+            >
+              <Text style={styles.primaryButtonText}>Create Item Group</Text>
+            </View>
+          </PressableScale>
+        )}
+      </View>
+
       <PressableScale onPress={handleAddItem}>
         <View style={styles.primaryButton}>
           <Text style={styles.primaryButtonText}>Submit</Text>
@@ -321,7 +446,6 @@ const AddItem = () => {
       <TouchableOpacity
         onPress={() => navigation.goBack()}
         style={styles.cancelButton}
-        activeOpacity={0.85}
       >
         <Text style={styles.cancelText}>Cancel</Text>
       </TouchableOpacity>
@@ -351,173 +475,174 @@ const AddItem = () => {
 };
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F9FAFB" },
-
+  safe: {
+    flex: 1,
+    backgroundColor: "#F9FAFB",
+  },
   container: {
     padding: 16,
-    paddingBottom: 28,
+    paddingBottom: 50,
   },
-
-  header: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#111827",
-    textAlign: "center",
-    marginBottom: 4,
+  scanWrap: {
+    marginBottom: 16,
   },
-
-  card: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 16,
-    padding: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 1,
-  },
-
-  label: {
-    fontWeight: "900",
-    color: "#111827",
-    marginBottom: 8,
-    fontSize: 13,
-    letterSpacing: 0.2,
-  },
-
-  scanWrap: { marginBottom: 2 },
   scanButton: {
-    backgroundColor: "#16A34A",
-    paddingVertical: 14,
-    borderRadius: 16,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
+    backgroundColor: "#F59E0B",
+    paddingVertical: 12,
+    borderRadius: 8,
   },
-  scanButtonText: { color: "#fff", fontWeight: "900", fontSize: 16 },
-
+  scanButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    marginLeft: 8,
+  },
+  card: {
+    backgroundColor: "#fff",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#111827",
+    marginBottom: 6,
+  },
   inputWithIcon: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: "#fff",
-    gap: 8,
+    backgroundColor: "#F3F4F6",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
   input: {
     flex: 1,
     fontSize: 16,
-    color: "#111827",
-    paddingVertical: 0,
-  },
-  clearBtn: { paddingLeft: 4 },
-
-  qtyInput: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: "#111827",
-    backgroundColor: "#fff",
-  },
-
-  pickerShell: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 14,
-    overflow: "hidden",
-    backgroundColor: "#fff",
-  },
-  picker: {
-    height: 52,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
     color: "#111827",
   },
-
+  clearBtn: {
+    paddingLeft: 6,
+  },
   suggestLoading: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginTop: 10,
-  },
-  suggestLoadingText: { color: "#6B7280", fontWeight: "800" },
-
-  suggestionsTitle: {
-    fontSize: 12,
-    fontWeight: "900",
-    color: "#6B7280",
-    letterSpacing: 0.4,
-    marginBottom: 2,
-  },
-
-  suggestionsBox: {
     marginTop: 8,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 14,
+  },
+  suggestLoadingText: {
+    marginLeft: 6,
+    color: "#6B7280",
+  },
+  suggestionsTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  suggestionsBox: {
+    backgroundColor: "#F9FAFB",
+    borderRadius: 8,
     overflow: "hidden",
-    backgroundColor: "#fff",
   },
   suggestionRow: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
+    borderBottomColor: "#E5E7EB",
   },
-  suggestionName: { fontSize: 15, color: "#111827", fontWeight: "800" },
+  suggestionName: {
+    fontSize: 16,
+    color: "#111827",
+  },
   suggestionBrand: {
+    fontSize: 14,
     color: "#6B7280",
-    fontSize: 12,
-    marginTop: 2,
-    fontWeight: "700",
+  },
+  pickerShell: {
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 8,
+    overflow: "hidden",
+    height: 44,
+    justifyContent: "center",
   },
 
+  picker: {
+    height: 56,
+    width: "100%",
+    color: "#111827",
+    fontSize: 16,
+  },
+
+  qtyInput: {
+    backgroundColor: "#F3F4F6",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 16,
+    color: "#111827",
+  },
   row: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
+    alignItems: "center",
     marginTop: 12,
   },
-  metaText: { color: "#374151", fontSize: 13, fontWeight: "800" },
-
+  metaText: {
+    fontSize: 14,
+    color: "#6B7280",
+  },
   secondaryButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    backgroundColor: "#fff",
+    backgroundColor: "#E5E7EB",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
   },
-  secondaryButtonText: { color: "#111827", fontWeight: "900" },
-
+  secondaryButtonText: {
+    marginLeft: 4,
+    fontSize: 14,
+    color: "#111827",
+  },
   primaryButton: {
-    backgroundColor: "#111827",
+    backgroundColor: "#10B981",
     paddingVertical: 14,
-    borderRadius: 16,
+    borderRadius: 12,
     alignItems: "center",
-    marginTop: 10,
+    marginBottom: 12,
   },
-  primaryButtonText: { color: "#fff", fontWeight: "900", fontSize: 16 },
-
-  cancelButton: { alignItems: "center", paddingVertical: 10 },
-  cancelText: { color: "#6B7280", fontWeight: "900" },
-
+  primaryButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  cancelButton: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "#F3F4F6",
+    marginBottom: 16,
+  },
+  cancelText: {
+    color: "#111827",
+    fontSize: 16,
+    fontWeight: "600",
+  },
   footer: {
-    fontSize: 11,
-    color: "#9CA3AF",
     textAlign: "center",
-    marginTop: 6,
-    fontWeight: "700",
+    fontSize: 12,
+    color: "#9CA3AF",
+    marginTop: 12,
   },
 });
 
