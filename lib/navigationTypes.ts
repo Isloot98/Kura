@@ -1,5 +1,9 @@
-
 export interface PantryCategory {
+  id: number;
+  name: string;
+}
+
+export interface PantryGroups {
   id: number;
   name: string;
 }
@@ -11,6 +15,7 @@ export interface PantryItem {
   unit: string;
   expiry_date: string;
   pantry_categories?: PantryCategory;
+  pantry_groups?: PantryGroups;
 }
 
 export type ShoppingListItem = {

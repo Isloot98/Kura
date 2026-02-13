@@ -109,7 +109,7 @@ const AddItem = () => {
 
       const { data: newGroup, error } = await supabase
         .from("pantry_groups")
-        .insert([{ group_name: newGroupName.trim(), user_id: user.id }])
+        .insert([{ name: newGroupName.trim(), user_id: user.id }])
         .select()
         .single();
 

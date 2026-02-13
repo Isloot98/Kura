@@ -11,7 +11,6 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Session } from "@supabase/supabase-js";
-import * as Linking from "expo-linking";
 
 import { supabase } from "./lib/supabase";
 
@@ -29,8 +28,6 @@ import AddRecipeScreen from "./screens/AddRecipeScreen";
 import EditRecipeScreen from "./screens/EditRecipeScreen";
 import BarcodeScannerScreen from "./screens/BarcodeScannerScreen";
 
-import ResetPasswordScreen from "./screens/ResetPasswordScreen";
-
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
@@ -38,7 +35,6 @@ const navigationRef = createNavigationContainerRef();
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
-  const [mustResetPassword, setMustResetPassword] = useState(false);
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
@@ -51,127 +47,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("AUTH EVENT:", event);
-
-      setSession(session);
-
-      if (event === "PASSWORD_RECOVERY") {
-        setMustResetPassword(true);
-      }
-
-      if (event === "SIGNED_OUT") {
-        setMustResetPassword(false);
-      }
-    });
-
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    const parseQuery = (qs: string) => {
-      return Object.fromEntries(
-        qs
-          .split("&")
-          .filter(Boolean)
-          .map((pair) => {
-            const [k, v] = pair.split("=");
-            return [decodeURIComponent(k), decodeURIComponent(v ?? "")];
-          }),
-      );
-    };
-
-    const handleDeepLink = async (rawUrl: string | null) => {
-      if (!rawUrl) return;
-      console.log("DEEP LINK RAW:", rawUrl);
-
-      try {
-        const [beforeHash, hashPart] = rawUrl.split("#");
-        const [base, queryPart] = beforeHash.split("?");
-
-        const query = queryPart ? parseQuery(queryPart) : {};
-        const fragment = hashPart ? parseQuery(hashPart) : {};
-
-        console.log("DEEP LINK PARSED:", { base, query, fragment });
-
-        if (fragment.access_token || fragment.refresh_token) {
-          console.log(
-            "Found tokens in fragment — calling supabase.auth.setSession",
-          );
-          const setRes = await supabase.auth.setSession({
-            access_token: fragment.access_token,
-            refresh_token: fragment.refresh_token,
-          });
-          console.log("setSession result:", setRes);
-          const { data } = await supabase.auth.getSession();
-          setSession(data.session);
-          return;
-        }
-
-        if (query.access_token || query.refresh_token) {
-          console.log(
-            "Found tokens in query — calling supabase.auth.setSession",
-          );
-          const setRes = await supabase.auth.setSession({
-            access_token: query.access_token,
-            refresh_token: query.refresh_token,
-          });
-          console.log("setSession result:", setRes);
-          const { data } = await supabase.auth.getSession();
-          setSession(data.session);
-          return;
-        }
-
-        if (query.code) {
-          console.log(
-            "Found code in query — attempting exchangeCodeForSession",
-          );
-          try {
-            const { data, error } =
-              await supabase.auth.exchangeCodeForSession(rawUrl);
-            console.log("exchangeCodeForSession result", { data, error });
-            if (error) {
-              console.error("exchangeCodeForSession error:", error);
-            } else if (data?.session) {
-              setSession(data.session);
-            }
-          } catch (e) {
-            console.error("exchangeCodeForSession threw:", e);
-          }
-          return;
-        }
-
-        if (query.error || fragment.error) {
-          console.warn("Deep link contains error param", { query, fragment });
-        } else {
-          console.log("Deep link contained no tokens/code — parsed values:", {
-            query,
-            fragment,
-          });
-        }
-      } catch (err) {
-        console.error("Error in handleDeepLink:", err);
-      }
-    };
-
-    void Linking.getInitialURL()
-      .then(handleDeepLink)
-      .catch((e) => console.error(e));
-
-    const sub = Linking.addEventListener("url", ({ url }) =>
-      handleDeepLink(url),
-    );
-    return () => sub.remove();
-  }, []);
-
-  const linking = {
-    prefixes: [Linking.createURL("/"), "kura://"],
-    config: {
-      screens: {
-        ResetPassword: "reset-password",
+    const { data: subscription } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
       },
-    },
-  };
+    );
+
+    return () => subscription.subscription.unsubscribe();
+  }, []);
 
   const SignOutButton = () => (
     <TouchableOpacity
@@ -186,7 +69,7 @@ export default function App() {
   );
 
   const common = {
-    headerStyle: { backgroundColor: "#fcba03" },
+    headerStyle: { backgroundColor: "#1976D2" },
     headerTitleAlign: "center" as const,
   };
 
@@ -194,7 +77,7 @@ export default function App() {
     <Tab.Navigator
       screenOptions={{
         tabBarStyle: { height: 85 },
-        headerStyle: { backgroundColor: "#f4511e", height: 110 },
+        headerStyle: { backgroundColor: "#1976D2", height: 110 },
         headerTitle: "",
         headerRight: () => <SignOutButton />,
         headerLeft: () => <Logo size={100} />,
@@ -219,10 +102,8 @@ export default function App() {
     </Tab.Navigator>
   );
 
-  if (booting) return null;
-
   return (
-    <NavigationContainer ref={navigationRef} linking={linking}>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator screenOptions={common}>
         {!session && (
           <Stack.Screen
@@ -269,33 +150,6 @@ export default function App() {
               name="EditRecipeScreen"
               component={EditRecipeScreen}
               options={{ title: "Edit Recipe" }}
-            />
-
-            <Stack.Screen
-              name="ResetPassword"
-              component={ResetPasswordScreen}
-              options={{
-                title: "Reset password",
-                headerBackVisible: false,
-                gestureEnabled: false,
-                headerLeft: () => null,
-                headerRight: () => null,
-              }}
-              initialParams={{
-                onDone: async () => {
-                  try {
-                    await supabase.auth.signOut();
-                  } catch (err) {
-                    console.error(
-                      "Error signing out after password reset:",
-                      err,
-                    );
-                  } finally {
-                    setSession(null);
-                    setMustResetPassword(false);
-                  }
-                },
-              }}
             />
           </>
         )}

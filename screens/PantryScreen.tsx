@@ -16,14 +16,6 @@ import { supabase } from "../lib/supabase";
 import { Picker } from "@react-native-picker/picker";
 import { RootStackParamList, PantryItem } from "../lib/navigationTypes";
 
-import Animated, {
-  FadeInDown,
-  FadeOut,
-  LinearTransition,
-  useAnimatedStyle,
-  withTiming,
-} from "react-native-reanimated";
-
 type PantryScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
   "Pantry"
@@ -33,53 +25,10 @@ interface Props {
   navigation: PantryScreenNavigationProp;
 }
 
-const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
-
-const PantryCard = ({ item }: { item: PantryItem }) => {
-  const [pressed, setPressed] = useState(false);
-
-  const pressStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: withTiming(pressed ? 0.98 : 1, { duration: 120 }) }],
-    opacity: withTiming(pressed ? 0.92 : 1, { duration: 120 }),
-  }));
-
-  return (
-    <Animated.View
-      entering={FadeInDown.duration(250).springify().damping(14)}
-      exiting={FadeOut.duration(120)}
-      layout={LinearTransition.springify().damping(16)}
-    >
-      <TouchableOpacity
-        activeOpacity={1}
-        onPressIn={() => setPressed(true)}
-        onPressOut={() => setPressed(false)}
-      >
-        <Animated.View style={[styles.itemCard, pressStyle]}>
-          <View style={styles.itemTopRow}>
-            <Text style={styles.itemName} numberOfLines={1}>
-              {item.name}
-            </Text>
-
-            <View style={styles.pill}>
-              <Text style={styles.pillText}>
-                {item.quantity} {item.unit}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.itemMetaRow}>
-            <Text style={styles.metaText}>
-              {item.pantry_categories?.name ?? "Uncategorised"}
-            </Text>
-            <Text style={styles.metaDot}>•</Text>
-            <Text style={styles.metaText}>
-              Exp {new Date(item.expiry_date).toLocaleDateString()}
-            </Text>
-          </View>
-        </Animated.View>
-      </TouchableOpacity>
-    </Animated.View>
-  );
+type GroupedCategories = {
+  [category: string]: {
+    [group: string]: PantryItem[];
+  };
 };
 
 const PantryScreen: React.FC<Props> = ({ navigation }) => {
@@ -87,13 +36,29 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+
   const [sortOption, setSortOption] = useState<"expiry" | "name" | "quantity">(
     "expiry",
   );
+
   const [categories, setCategories] = useState<{ id: number; name: string }[]>(
     [],
   );
 
+  const [itemGroups, setItemGroups] = useState<{ id: number; name: string }[]>(
+    [],
+  );
+
+  const [expandedCategories, setExpandedCategories] = useState<{
+    [key: string]: boolean;
+  }>({});
+
+  const [expandedGroups, setExpandedGroups] = useState<{
+    [key: string]: boolean;
+  }>({});
+
+  // Fetch pantry items
   const fetchPantryItems = async () => {
     setLoading(true);
 
@@ -110,7 +75,7 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
 
     const { data, error } = await supabase
       .from("pantry_items")
-      .select("*, pantry_categories(name)")
+      .select("*, pantry_categories(name), pantry_groups(name)")
       .eq("user_id", user.id);
 
     if (error) {
@@ -121,11 +86,6 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
 
     setLoading(false);
   };
-
-  useEffect(() => {
-    const unsubscribe = navigation.addListener("focus", fetchPantryItems);
-    return unsubscribe;
-  }, [navigation]);
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -143,10 +103,32 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
     fetchCategories();
   }, []);
 
+  useEffect(() => {
+    const fetchGroups = async () => {
+      const { data, error } = await supabase
+        .from("pantry_groups")
+        .select("id, name");
+
+      if (error) {
+        console.error("Group fetch error:", error);
+      } else {
+        setItemGroups(data || []);
+      }
+    };
+
+    fetchGroups();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("focus", fetchPantryItems);
+    return unsubscribe;
+  }, [navigation]);
+
   const handleAddPress = () => {
     navigation.navigate("AddItem");
   };
 
+  // Filter + Sort
   const filteredAndSortedItems = items
     .filter((item) =>
       item.name.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -156,6 +138,9 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
         ? item.pantry_categories?.name === selectedCategory
         : true,
     )
+    .filter((item) =>
+      selectedGroup ? item.pantry_groups?.name === selectedGroup : true,
+    )
     .sort((a, b) => {
       if (sortOption === "expiry") {
         return (
@@ -163,19 +148,145 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
         );
       } else if (sortOption === "name") {
         return a.name.localeCompare(b.name);
-      } else if (sortOption === "quantity") {
+      } else {
         return a.quantity - b.quantity;
       }
-      return 0;
     });
 
-  const renderItem = ({ item }: { item: PantryItem }) => (
-    <PantryCard item={item} />
+  // Nested grouping
+  const groupedCategories: GroupedCategories = filteredAndSortedItems.reduce(
+    (acc, item) => {
+      const category = item.pantry_categories?.name || "Uncategorised";
+      const group = item.pantry_groups?.name || "Uncategorised";
+
+      if (!acc[category]) acc[category] = {};
+      if (!acc[category][group]) acc[category][group] = [];
+
+      acc[category][group].push(item);
+
+      return acc;
+    },
+    {} as GroupedCategories,
   );
+
+  // Toggles
+  const toggleCategory = (category: string) => {
+    setExpandedCategories((prev) => ({
+      ...prev,
+      [category]: !prev[category],
+    }));
+  };
+
+  const toggleGroup = (category: string, group: string) => {
+    const key = `${category}-${group}`;
+
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  // Item renderer
+  const renderItemCard = (item: PantryItem) => (
+    <View key={item.id} style={styles.itemCard}>
+      <View style={styles.itemTopRow}>
+        <Text style={styles.itemName} numberOfLines={1}>
+          {item.name}
+        </Text>
+
+        <View style={styles.pill}>
+          <Text style={styles.pillText}>
+            {item.quantity} {item.unit}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.itemMetaRow}>
+        <Text style={styles.metaText}>
+          Exp{" "}
+          {item.expiry_date
+            ? new Date(item.expiry_date).toLocaleDateString()
+            : "No expiry"}
+        </Text>
+      </View>
+    </View>
+  );
+
+  const renderNestedGroup = (
+    category: string,
+    group: string,
+    items: PantryItem[],
+  ) => {
+    const key = `${category}-${group}`;
+    const isExpanded = expandedGroups[key] || false;
+
+    const totalQuantity = items.reduce((sum, i) => sum + i.quantity, 0);
+
+    return (
+      <View key={key}>
+        <TouchableOpacity
+          onPress={() => toggleGroup(category, group)}
+          style={[styles.groupHeader, { backgroundColor: "#fff" }]}
+        >
+          <Text style={[styles.groupTitle, { fontSize: 15 }]}>{group}</Text>
+
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Text style={styles.groupTotal}>{totalQuantity}</Text>
+            <Ionicons
+              name={isExpanded ? "chevron-up-outline" : "chevron-down-outline"}
+              size={18}
+              color="#111827"
+              style={{ marginLeft: 6 }}
+            />
+          </View>
+        </TouchableOpacity>
+
+        {isExpanded && items.map(renderItemCard)}
+      </View>
+    );
+  };
+
+  const renderCategory = (
+    category: string,
+    groups: Record<string, PantryItem[]>,
+  ) => {
+    const isExpanded = expandedCategories[category] || false;
+
+    const totalQuantity = Object.values(groups)
+      .flat()
+      .reduce((sum, i) => sum + i.quantity, 0);
+
+    return (
+      <View key={category} style={styles.groupContainer}>
+        <TouchableOpacity
+          onPress={() => toggleCategory(category)}
+          style={styles.groupHeader}
+        >
+          <Text style={styles.groupTitle}>{category}</Text>
+
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Text style={styles.groupTotal}>{totalQuantity}</Text>
+            <Ionicons
+              name={isExpanded ? "chevron-up-outline" : "chevron-down-outline"}
+              size={18}
+              color="#111827"
+              style={{ marginLeft: 6 }}
+            />
+          </View>
+        </TouchableOpacity>
+
+        {isExpanded &&
+          Object.entries(groups).map(([group, items]) =>
+            renderNestedGroup(category, group, items as PantryItem[]),
+          )}
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
+        {/* SEARCH */}
         <View style={styles.searchWrap}>
           <Ionicons
             name="search"
@@ -190,47 +301,9 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
             style={styles.searchInput}
             placeholderTextColor="#9CA3AF"
           />
-          {!!searchQuery && (
-            <TouchableOpacity
-              onPress={() => setSearchQuery("")}
-              style={styles.clearBtn}
-            >
-              <Ionicons name="close-circle" size={18} color="#9CA3AF" />
-            </TouchableOpacity>
-          )}
         </View>
 
-        <View style={styles.controlsCard}>
-          <Text style={styles.controlsTitle}>Filters</Text>
-
-          <View style={styles.pickerShell}>
-            <Picker
-              selectedValue={selectedCategory}
-              onValueChange={(value) => setSelectedCategory(value)}
-              style={styles.picker}
-              dropdownIconColor="#111"
-            >
-              <Picker.Item label="All Categories" value={null} />
-              {categories.map((cat) => (
-                <Picker.Item key={cat.id} label={cat.name} value={cat.name} />
-              ))}
-            </Picker>
-          </View>
-
-          <View style={styles.pickerShell}>
-            <Picker
-              selectedValue={sortOption}
-              onValueChange={(value) => setSortOption(value)}
-              style={styles.picker}
-              dropdownIconColor="#111"
-            >
-              <Picker.Item label="Sort: Expiry" value="expiry" />
-              <Picker.Item label="Sort: Name" value="name" />
-              <Picker.Item label="Sort: Quantity" value="quantity" />
-            </Picker>
-          </View>
-        </View>
-
+        {/* LIST */}
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator size="large" />
@@ -246,14 +319,15 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         ) : (
           <FlatList
-            data={filteredAndSortedItems}
-            keyExtractor={(item) => item.id.toString()}
-            renderItem={renderItem}
+            data={Object.entries(groupedCategories)}
+            keyExtractor={([category]) => category}
+            renderItem={({ item }) => renderCategory(item[0], item[1])}
             contentContainerStyle={{ paddingBottom: 110 }}
             showsVerticalScrollIndicator={false}
           />
         )}
 
+        {/* FAB */}
         <TouchableOpacity
           style={styles.fab}
           onPress={handleAddPress}
@@ -268,13 +342,11 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#fff" },
-
   container: {
     flex: 1,
     paddingHorizontal: 16,
     paddingTop: 10,
   },
-
   searchWrap: {
     flexDirection: "row",
     alignItems: "center",
@@ -292,7 +364,6 @@ const styles = StyleSheet.create({
     color: "#111827",
   },
   clearBtn: { paddingLeft: 8, paddingVertical: 2 },
-
   controlsCard: {
     borderWidth: 1,
     borderColor: "#E5E7EB",
@@ -320,20 +391,27 @@ const styles = StyleSheet.create({
     height: 48,
     color: "#111827",
   },
-
-  itemCard: {
-    backgroundColor: "#fff",
+  groupContainer: {
+    marginBottom: 12,
+    borderRadius: 12,
+    overflow: "hidden",
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    borderRadius: 16,
+  },
+  groupHeader: {
+    backgroundColor: "#f3f4f6",
+    padding: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  groupTitle: { fontWeight: "900", fontSize: 16 },
+  groupTotal: { fontWeight: "700", fontSize: 14, color: "#6B7280" },
+  itemCard: {
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
     padding: 14,
-    marginBottom: 10,
-
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
   },
   itemTopRow: {
     flexDirection: "row",
@@ -373,7 +451,6 @@ const styles = StyleSheet.create({
     color: "#D1D5DB",
     fontWeight: "900",
   },
-
   center: {
     flex: 1,
     alignItems: "center",
@@ -398,7 +475,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 18,
   },
-
   fab: {
     position: "absolute",
     bottom: 26,
