@@ -9,11 +9,11 @@ import {
   TextInput,
   SafeAreaView,
   Platform,
+  Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { supabase } from "../lib/supabase";
-import { Picker } from "@react-native-picker/picker";
 import { RootStackParamList, PantryItem } from "../lib/navigationTypes";
 
 type PantryScreenNavigationProp = NativeStackNavigationProp<
@@ -57,8 +57,10 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
   const [expandedGroups, setExpandedGroups] = useState<{
     [key: string]: boolean;
   }>({});
+  const [useModalVisible, setUseModalVisible] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<PantryItem | null>(null);
+  const [useAmount, setUseAmount] = useState("");
 
-  // Fetch pantry items
   const fetchPantryItems = async () => {
     setLoading(true);
 
@@ -86,6 +88,12 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
 
     setLoading(false);
   };
+
+  useEffect(() => {
+    fetchPantryItems();
+    const unsubscribe = navigation.addListener("focus", fetchPantryItems);
+    return unsubscribe;
+  }, [navigation]);
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -119,15 +127,60 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
     fetchGroups();
   }, []);
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener("focus", fetchPantryItems);
-    return unsubscribe;
-  }, [navigation]);
-
   const handleAddPress = () => {
     navigation.navigate("AddItem");
   };
+  // Use item logic
 
+  const handleUseSubmit = async () => {
+    if (!selectedItem) return;
+
+    const used = parseFloat(useAmount);
+
+    if (isNaN(used) || used <= 0) {
+      console.log("Invalid amount");
+      return;
+    }
+
+    if (used > selectedItem.quantity) {
+      console.log("Cannot use more than available");
+      return;
+    }
+
+    const newQuantity = Number((selectedItem.quantity - used).toFixed(3));
+
+    console.log("Updating item:", selectedItem.id);
+    console.log("Old qty:", selectedItem.quantity);
+    console.log("New qty:", newQuantity);
+
+    let response;
+
+    if (newQuantity <= 0) {
+      response = await supabase
+        .from("pantry_items")
+        .delete()
+        .eq("id", selectedItem.id);
+    } else {
+      response = await supabase
+        .from("pantry_items")
+        .update({ quantity: newQuantity })
+        .eq("id", selectedItem.id)
+        .select(); // 👈 important for debugging
+    }
+
+    if (response.error) {
+      console.log("Supabase error:", response.error);
+      return;
+    }
+
+    console.log("Update success:", response.data);
+
+    setUseModalVisible(false);
+    setUseAmount("");
+    setSelectedItem(null);
+
+    fetchPantryItems();
+  };
   // Filter + Sort
   const filteredAndSortedItems = items
     .filter((item) =>
@@ -194,10 +247,23 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
           {item.name}
         </Text>
 
-        <View style={styles.pill}>
-          <Text style={styles.pillText}>
-            {item.quantity} {item.unit}
-          </Text>
+        <View style={styles.quantityContainer}>
+          <View style={styles.pill}>
+            <Text style={styles.pillText}>
+              {item.quantity} {item.unit}
+            </Text>
+
+            <TouchableOpacity
+              onPress={() => {
+                setSelectedItem(item);
+                setUseModalVisible(true);
+              }}
+              style={styles.useButton}
+            >
+              <Ionicons name="restaurant-outline" size={16} color="#2563EB" />
+              <Text style={styles.useText}>Use</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -252,10 +318,6 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
   ) => {
     const isExpanded = expandedCategories[category] || false;
 
-    const totalQuantity = Object.values(groups)
-      .flat()
-      .reduce((sum, i) => sum + i.quantity, 0);
-
     return (
       <View key={category} style={styles.groupContainer}>
         <TouchableOpacity
@@ -265,7 +327,6 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.groupTitle}>{category}</Text>
 
           <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <Text style={styles.groupTotal}>{totalQuantity}</Text>
             <Ionicons
               name={isExpanded ? "chevron-up-outline" : "chevron-down-outline"}
               size={18}
@@ -288,12 +349,7 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
       <View style={styles.container}>
         {/* SEARCH */}
         <View style={styles.searchWrap}>
-          <Ionicons
-            name="search"
-            size={18}
-            color="#6B7280"
-            style={{ marginRight: 8 }}
-          />
+          <Ionicons name="search" size={18} color="#6B7280" />
           <TextInput
             placeholder="Search pantry"
             value={searchQuery}
@@ -307,15 +363,6 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator size="large" />
-            <Text style={styles.loadingText}>Loading pantry…</Text>
-          </View>
-        ) : filteredAndSortedItems.length === 0 ? (
-          <View style={styles.center}>
-            <Ionicons name="cube-outline" size={38} color="#9CA3AF" />
-            <Text style={styles.emptyTitle}>No items yet</Text>
-            <Text style={styles.emptySub}>
-              Scan a barcode or add an item to get started.
-            </Text>
           </View>
         ) : (
           <FlatList
@@ -323,18 +370,48 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
             keyExtractor={([category]) => category}
             renderItem={({ item }) => renderCategory(item[0], item[1])}
             contentContainerStyle={{ paddingBottom: 110 }}
-            showsVerticalScrollIndicator={false}
           />
         )}
 
         {/* FAB */}
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={handleAddPress}
-          activeOpacity={0.9}
-        >
+        <TouchableOpacity style={styles.fab} onPress={handleAddPress}>
           <Ionicons name="add" size={28} color="#fff" />
         </TouchableOpacity>
+
+        {/* USE MODAL */}
+        <Modal visible={useModalVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>
+                How much did you use? ({selectedItem?.unit})
+              </Text>
+
+              <TextInput
+                keyboardType="numeric"
+                value={useAmount}
+                onChangeText={setUseAmount}
+                style={styles.modalInput}
+                placeholder="Enter amount"
+              />
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setUseModalVisible(false);
+                    setUseAmount("");
+                    setSelectedItem(null);
+                  }}
+                >
+                  <Text style={{ color: "#6B7280" }}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={handleUseSubmit}>
+                  <Text style={{ fontWeight: "bold" }}>Confirm</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     </SafeAreaView>
   );
@@ -342,55 +419,18 @@ const PantryScreen: React.FC<Props> = ({ navigation }) => {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#fff" },
-  container: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-  },
+  container: { flex: 1, paddingHorizontal: 16, paddingTop: 10 },
   searchWrap: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    backgroundColor: "#fff",
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: Platform.OS === "ios" ? 12 : 10,
     marginBottom: 12,
   },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: "#111827",
-  },
-  clearBtn: { paddingLeft: 8, paddingVertical: 2 },
-  controlsCard: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 12,
-  },
-  controlsTitle: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#6B7280",
-    marginBottom: 8,
-    letterSpacing: 0.2,
-  },
-  pickerShell: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 14,
-    overflow: "hidden",
-    backgroundColor: "#fff",
-    marginBottom: 10,
-  },
-  picker: {
-    height: 48,
-    color: "#111827",
-  },
+  searchInput: { flex: 1, fontSize: 16, marginLeft: 8 },
   groupContainer: {
     marginBottom: 12,
     borderRadius: 12,
@@ -415,66 +455,19 @@ const styles = StyleSheet.create({
   },
   itemTopRow: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-    gap: 10,
   },
-  itemName: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: "900",
-    color: "#111827",
-  },
+  itemName: { flex: 1, fontSize: 16, fontWeight: "900" },
   pill: {
     backgroundColor: "#F3F4F6",
     borderRadius: 999,
     paddingVertical: 6,
     paddingHorizontal: 10,
   },
-  pillText: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#111827",
-  },
-  itemMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 10,
-  },
-  metaText: {
-    fontSize: 13,
-    color: "#6B7280",
-    fontWeight: "700",
-  },
-  metaDot: {
-    marginHorizontal: 8,
-    color: "#D1D5DB",
-    fontWeight: "900",
-  },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-  },
-  loadingText: {
-    marginTop: 10,
-    color: "#6B7280",
-    fontWeight: "700",
-  },
-  emptyTitle: {
-    marginTop: 10,
-    fontSize: 16,
-    fontWeight: "900",
-    color: "#111827",
-  },
-  emptySub: {
-    marginTop: 6,
-    fontSize: 13,
-    color: "#6B7280",
-    textAlign: "center",
-    lineHeight: 18,
-  },
+  pillText: { fontSize: 13, fontWeight: "800" },
+  itemMetaRow: { marginTop: 10 },
+  metaText: { fontSize: 13, color: "#6B7280" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
   fab: {
     position: "absolute",
     bottom: 26,
@@ -485,11 +478,53 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    marginBottom: 12,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 14,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  quantityContainer: {
+    alignItems: "center",
+  },
+
+  useButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 6,
+    backgroundColor: "#EFF6FF",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+
+  useText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#2563EB",
   },
 });
 
